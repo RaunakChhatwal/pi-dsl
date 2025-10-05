@@ -34,9 +34,11 @@ module Environment
 where
 
 import Control.Monad.Except
-    ( unless, MonadError(..), MonadIO(..), ExceptT, runExceptT )
+    ( MonadError(..), ExceptT, runExceptT )
 import Control.Monad.Reader
     ( MonadReader(local), asks, ReaderT(runReaderT) )
+import Control.Monad ( unless )
+import Control.Monad.IO.Class ( MonadIO(..) )
 import Data.List 
 import Data.Maybe ( listToMaybe )
 import PrettyPrint ( SourcePos, render, D(..), Disp(..), Doc )

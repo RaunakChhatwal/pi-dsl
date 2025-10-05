@@ -23,6 +23,7 @@ import qualified LayoutToken as Token
 
 import Control.Monad.State.Lazy hiding (join)
 import Control.Monad.Except ( MonadError(throwError) )
+import Control.Monad ( forM_ )
 import Data.List ( foldl' )
 import qualified Data.Set as S
 

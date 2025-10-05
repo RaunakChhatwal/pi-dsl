@@ -10,6 +10,7 @@ import Text.ParserCombinators.Parsec.Error ( ParseError )
 
 import Control.Monad.Except
 import Control.Monad.State.Lazy
+import Control.Monad ( filterM )
 import System.FilePath
 import System.Directory
 import qualified Data.Graph as Gr

@@ -5,6 +5,8 @@
 module TypeCheck (tcModules, inferType, checkType) where
 
 import Control.Monad.Except
+import Control.Monad (unless, foldM)
+import Control.Monad.IO.Class (liftIO)
 import Data.List (nub)
 
 import Data.Maybe ( catMaybes )
