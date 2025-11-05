@@ -25,7 +25,12 @@ common shared-properties
   default-extensions: 
     DefaultSignatures
     DeriveAnyClass
-    DerivingStrategies 
+    DerivingStrategies
+    QuasiQuotes
+    TemplateHaskell
+    AllowAmbiguousTypes
+    TypeApplications
+    LambdaCase
      
   build-depends:  
     base >= 4 && < 5,
@@ -39,7 +44,9 @@ common shared-properties
     directory,
     filepath,
     HUnit,
-    QuickCheck
+    QuickCheck,
+    template-haskell,
+    string-interpolate
   if !impl(ghc >= 8.0)
     build-depends: semigroups       
  
@@ -57,6 +64,7 @@ library
     Syntax
     TypeCheck
     Arbitrary
+    Export
   
 executable pi-forall
   import: shared-properties
@@ -71,3 +79,11 @@ test-suite test-pi-forall
   type: exitcode-stdio-1.0
   hs-source-dirs: test
   main-is: Main.hs
+
+foreign-library pi-forall-shared
+  import: shared-properties
+  type: native-shared
+  build-depends: pi-forall
+  hs-source-dirs: src
+  other-modules: Export
+  c-sources: csrc/export.c
