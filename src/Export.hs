@@ -19,6 +19,7 @@ import Data.String.Interpolate (i)
 import Control.Monad.Reader (asks, Reader, runReader)
 import Control.Monad.State (StateT (runStateT), get, modify, lift)
 import Control.Exception (assert)
+import Data.Char (toLower, isUpper)
 
 -- Extract parameter types from TH constructor
 conParamTypes :: TH.Con -> [TH.Type]
@@ -110,16 +111,24 @@ typeBinding TH.ListT = return List
 typeBinding (TH.VarT name) = asks (TypeArg . fromJust . elemIndex name)
 typeBinding type' = error [i|Type not implemented: #{show type'}|]
 
+-- Convert CamelCase names to snake_case format
+snakeCase :: TH.Name -> String
+snakeCase typeName = map toLower $ go (TH.nameBase typeName)
+  where
+    go [] = []
+    go (c1:c2:cs) | isUpper c2 = c1 : '_' : (c2 : cs)
+    go (c:cs) = c : go cs
+
 -- Convert TH constructor to Python union field
 constructorBinding :: TH.Con -> Reader [TypeParamName] (Maybe Field)
 constructorBinding (TH.NormalC _ []) = return Nothing
 constructorBinding (TH.NormalC conName [(_, paramType)]) =
-  Just . (TH.nameBase conName,) <$> typeBinding paramType
+  Just . (snakeCase conName,) <$> typeBinding paramType
 constructorBinding (TH.NormalC conName paramTypes) =
-  Just . (TH.nameBase conName,) . foldl App Tuple <$> mapM (typeBinding . snd) paramTypes
+  Just . (snakeCase conName,) . foldl App Tuple <$> mapM (typeBinding . snd) paramTypes
 constructorBinding (TH.RecC conName params) = assert (length params >= 2) $
   let paramTypes = map (\(_, _, type') -> type') params
-  in Just . (TH.nameBase conName,) . foldl App Tuple <$> mapM typeBinding paramTypes
+  in Just . (snakeCase conName,) . foldl App Tuple <$> mapM typeBinding paramTypes
 constructorBinding constructor = error [i|Constructor not implemented: #{TH.pprint constructor}|]
 
 -- Extract name from TH type parameter
@@ -137,8 +146,8 @@ dataBinding typeName typeParams constructors =
     unionFields = runReader (catMaybes <$> mapM constructorBinding constructors) typeParamNames
     union = ClassBinding Union [i|#{name}Union|] arity unionFields
     kind = ("kind", CType CInt32)
-    structureFields = [kind, ("union", Pointer $ TypeVar [i|#{name}Union|])]
-    structure = ClassBinding Structure name arity structureFields
+    structFields = [kind, ([i|#{snakeCase typeName}_union|], Pointer $ TypeVar [i|#{name}Union|])]
+    structure = ClassBinding Structure name arity structFields
   in case unionFields of
     [] -> TaggedUnion Nothing $ structure { fields = [kind] }
     [field] -> TaggedUnion Nothing $ structure { fields = [kind, second Pointer field] }
