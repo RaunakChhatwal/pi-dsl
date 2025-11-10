@@ -1,9 +1,7 @@
-{-# LANGUAGE ForeignFunctionInterface #-}
+module Bindings where
 
-module Export(dbg) where
-
-import Foreign.C.Types qualified as F
 import Foreign qualified as F
+import Foreign.C.Types qualified as F
 import Foreign.C.String qualified as F
 import Language.Haskell.TH qualified as TH
 import Syntax (Epsilon, Term)
@@ -30,23 +28,20 @@ destructureCtor (TH.NormalC name params) = (name, map snd params)
 destructureCtor (TH.RecC name params) = (name, [paramType | (_, _, paramType) <- params])
 destructureCtor _ = undefined
 
--- Convert TH type info into dependency forest, tracking visited types
-graphFromTypeInfo :: TH.Info -> StateT (Set TH.Name) TH.Q (Tree.Forest TH.Name)
-graphFromTypeInfo (TH.TyConI (TH.DataD [] typeName _ Nothing ctors _)) = do
+declOrderFromTypeInfo :: TH.Info -> StateT (Set TH.Name) TH.Q [TH.Name]
+declOrderFromTypeInfo (TH.TyConI (TH.DataD [] typeName _ Nothing ctors _)) = do
   let paramTypes = concatMap (snd . destructureCtor) ctors
-  forest <- concat <$> mapM typeGraphHelper paramTypes
-  return [Tree.Node typeName forest]
-graphFromTypeInfo (TH.TyConI (TH.TySynD typeName [] typeSynonym)) = do
-  forest <- typeGraphHelper typeSynonym
-  return [Tree.Node typeName forest]
-graphFromTypeInfo (TH.TyConI (TH.NewtypeD [] typeName [] Nothing ctor _)) = do
-  forest <- concat <$> mapM typeGraphHelper (snd $ destructureCtor ctor)
-  return [Tree.Node typeName forest]
-graphFromTypeInfo typeInfo = error [i|Type info not implemented: #{TH.pprint typeInfo}|]
+  prev <- concat <$> mapM declOrderHelper paramTypes
+  return $ prev ++ [typeName]
+declOrderFromTypeInfo (TH.TyConI (TH.TySynD typeName [] typeSynonym)) =
+  (++ [typeName]) <$> declOrderHelper typeSynonym
+declOrderFromTypeInfo (TH.TyConI (TH.NewtypeD [] typeName [] Nothing ctor _)) = do
+  prev <- concat <$> mapM declOrderHelper (snd $ destructureCtor ctor)
+  return $ prev ++ [typeName]
+declOrderFromTypeInfo typeInfo = error [i|Type info not implemented: #{TH.pprint typeInfo}|]
 
--- Recursively build type dependency forest, avoiding cycles
-typeGraphHelper :: TH.Type -> StateT (Set TH.Name) TH.Q (Tree.Forest TH.Name)
-typeGraphHelper (TH.ConT typeName) = do
+declOrderHelper :: TH.Type -> StateT (Set TH.Name) TH.Q [TH.Name]
+declOrderHelper (TH.ConT typeName) = do
   vis <- get
   let visited = typeName `Set.member` vis
   let primitive = TH.nameBase typeName `elem` ["Bool", "Int", "Integer", "String"]
@@ -54,18 +49,15 @@ typeGraphHelper (TH.ConT typeName) = do
   else do
     typeInfo <- lift (TH.reify typeName)
     modify (Set.insert typeName)
-    graphFromTypeInfo typeInfo
-typeGraphHelper (TH.AppT a b) = (++) <$> typeGraphHelper a <*> typeGraphHelper b
-typeGraphHelper TH.ListT = return []
-typeGraphHelper (TH.TupleT 2) = return []   -- Storable only implemented for 2-tuples
-typeGraphHelper (TH.VarT {}) = return []
-typeGraphHelper type' = error [i|Type not implemented: #{TH.pprint type'}|]
+    declOrderFromTypeInfo typeInfo
+declOrderHelper (TH.AppT a b) = (++) <$> declOrderHelper a <*> declOrderHelper b
+declOrderHelper TH.ListT = return []
+declOrderHelper (TH.TupleT 2) = return []
+declOrderHelper (TH.VarT {}) = return []
+declOrderHelper type' = error [i|Type not implemented: #{TH.pprint type'}|]
 
--- Build complete dependency graph starting from Term
-buildTypeGraph :: TH.Q (Tree TH.Name)
-buildTypeGraph = do
-  ([graph], _) <- runStateT (typeGraphHelper (TH.ConT ''Term)) Set.empty
-  return graph
+buildDeclOrder :: TH.Name -> TH.Q [TH.Name]
+buildDeclOrder root = fst <$> runStateT (declOrderHelper $ TH.ConT root) Set.empty
 
 -- Primitive C types that map to ctypes
 data CType = CBool | CInt32 | CCharP
@@ -167,14 +159,6 @@ bindingFromName typeName = TH.reify typeName <&> \case
     return $ TypeAlias (TH.nameBase typeName) typeDef
   typeInfo -> error [i|Type info not implemented: #{TH.pprint typeInfo}|]
 
--- Collect all bindings in dependency order
-collectBindings :: TH.Q [Binding]
-collectBindings = buildTypeGraph >>= go where
-  go (Tree.Node typeName children) = do
-    binding <- bindingFromName typeName
-    childBindings <- concat <$> mapM go children
-    return $ childBindings ++ [binding]
-
 -- Unfold type application: F[A,B] -> (F, [A,B])
 unfoldApp :: TypeBinding -> (TypeBinding, [TypeBinding])
 unfoldApp (App a b) = second (++ [b]) (unfoldApp a)
@@ -254,56 +238,6 @@ sizeOf = F.sizeOf (undefined :: a)
 alignment :: forall a. F.Storable a => Int
 alignment = F.alignment (undefined :: a)
 
-instance (F.Storable a, F.Storable b) => F.Storable (a, b) where
-  alignment _ = max (alignment @a) (alignment @b)
-
-  sizeOf _ = alignOffsetUp (bOffset + sizeOf @b) (alignment @(a, b))
-    where bOffset = alignOffsetUp (sizeOf @a) (alignment @b)
-
-  peek ptr = do
-    let bOffset = alignOffsetUp (sizeOf @a) (alignment @b)
-    a <- F.peekByteOff ptr 0
-    b <- F.peekByteOff ptr bOffset
-    return (a, b)
-
-  poke ptr (a, b) = do
-    let bOffset = alignOffsetUp (sizeOf @a) (alignment @b)
-    F.pokeByteOff ptr 0 a
-    F.pokeByteOff ptr bOffset b
-
-addLength :: F.Ptr (F.CInt, F.CString) -> IO F.CInt
-addLength ptr = do
-  (n, cstr) <- F.peek ptr
-  str <- F.peekCString cstr
-  return $ n + fromIntegral (length str)
-
-foreign export ccall "add_length" addLength :: F.Ptr (F.CInt, F.CString) -> IO F.CInt
-
-instance F.Storable a => F.Storable [a] where
-  alignment _ = max (alignment @F.CSize) (alignment @(F.Ptr a))
-
-  sizeOf _ = alignOffsetUp (dataOffset + sizeOf @(F.Ptr a)) (alignment @[a])
-    where dataOffset = alignOffsetUp (sizeOf @F.CSize) (alignment @(F.Ptr a))
-
-  peek ptr = do
-    let dataOffset = alignOffsetUp (sizeOf @F.CSize) (alignment @(F.Ptr a))
-    len :: F.CSize <- F.peekByteOff ptr 0
-    dataPtr <- F.peekByteOff ptr dataOffset
-    F.peekArray (fromIntegral len) dataPtr
-
-  poke ptr xs = do
-    let dataOffset = alignOffsetUp (sizeOf @F.CSize) (alignment @(F.Ptr a))
-    dataPtr <- F.mallocArray (length xs)
-    F.pokeArray dataPtr xs
-    let len :: F.CSize = fromIntegral (length xs)
-    F.pokeByteOff ptr 0 len
-    F.pokeByteOff ptr dataOffset dataPtr
-
-sumCInts :: F.Ptr [F.CInt] -> IO F.CInt
-sumCInts ptr = sum <$> F.peek ptr
-
-foreign export ccall "sum" sumCInts :: F.Ptr [F.CInt] -> IO F.CInt
-
 offsetName :: Int -> TH.Name
 offsetName i = TH.mkName ("offset" ++ show i)
 
@@ -355,48 +289,51 @@ pokeMatchStmt kind (ctorName, paramTypes) = let
     return $ TH.DoE Nothing (offsetDecls ++ [allocStmt] ++ pokeFieldStmts ++ [returnStmt])
 
 storableForData :: TH.Name -> [TH.Type] -> [(TH.Name, [TH.Type])] -> TH.Q TH.Dec
-storableForData typeName typeParams ctors
-  | kindOnly = TH.InstanceD Nothing constraints <$> storable <*> (fmap concat . sequence)
-    [[d| alignment _ = alignment @F.CInt |], [d| sizeOf _ = sizeOf @F.CInt |], peekImpl, pokeImpl]
-  | otherwise = TH.InstanceD Nothing constraints <$> storable <*> decls
-  where
-    decls = mapM (head <$>) [alignmentImpl, sizeOfImpl, peekImpl, pokeImpl]
-    storable = TH.AppT (TH.ConT ''F.Storable) <$> self
-    constraints = map (TH.AppT $ TH.ConT ''F.Storable) typeParams
+storableForData typeName typeParams ctors =
+  TH.InstanceD Nothing constraints <$> storable <*> decls where
+  decls = sequence [alignmentImpl, sizeOfImpl, peekImpl, pokeImpl]
+  storable = TH.AppT (TH.ConT ''F.Storable) <$> selfType
+  constraints = map (TH.AppT $ TH.ConT ''F.Storable) typeParams
 
-    alignmentImpl = [d| alignment _ = max (alignment @F.CInt) (alignment @(F.Ptr ())) |]
-    sizeOfImpl =
-      [d| sizeOf _ = alignOffsetUp ($unionOffset + sizeOf @(F.Ptr ())) (alignment @($self)) |]
-    self = pure $ foldl TH.AppT (TH.ConT typeName) typeParams
+  alignmentImpl = implMethod 'F.alignment [TH.WildP] <$> if kindOnly
+    then [| alignment @F.CInt |]
+    else [| max (alignment @F.CInt) (alignment @(F.Ptr ())) |]
 
-    peekImpl = [d|
-      peek ptr = do
-        kind :: F.CInt <- F.peekByteOff ptr 0
-        unionPtr <- $(bool [| F.peekByteOff ptr $unionOffset |] [| return undefined |] kindOnly)
-        $(TH.CaseE <$> [|kind|] <*> zipWithM peekMatchStmt [0..] ctors) |]
+  sizeOfImpl = implMethod 'F.sizeOf [TH.WildP] <$> if kindOnly
+    then [| sizeOf @F.CInt |]
+    else [| alignOffsetUp ($unionOffset + sizeOf @(F.Ptr ())) (alignment @($selfType)) |]
+  selfType = pure $ foldl TH.AppT (TH.ConT typeName) typeParams
 
-    pokeImpl = [d|
-      poke ptr self = do
-        (kind, unionPtr) <- $(TH.CaseE <$> [|self|] <*> zipWithM pokeMatchStmt [0..] ctors)
-        F.pokeByteOff ptr 0 kind
-        $(bool [| F.pokeByteOff ptr $unionOffset unionPtr |] [| return () |] kindOnly) |]
+  peekImpl = implMethod 'F.peek [ptrArg] <$> [| do
+    kind :: F.CInt <- F.peekByteOff $ptr 0
+    unionPtr <- $(bool [| F.peekByteOff $ptr $unionOffset |] [| return undefined |] kindOnly)
+    $(TH.CaseE <$> [|kind|] <*> zipWithM peekMatchStmt [0..] ctors) |]
 
-    unionOffset = [| alignOffsetUp (sizeOf @F.CInt) (alignment @(F.Ptr ())) |]
-    kindOnly = all (null . snd) ctors
+  pokeImpl = implMethod 'F.poke [ptrArg, selfArg] <$> [| do
+    (kind :: F.CInt, unionPtr) <- $(TH.CaseE <$> self <*> zipWithM pokeMatchStmt [0..] ctors)
+    F.pokeByteOff $ptr 0 kind
+    $(bool [| F.pokeByteOff $ptr $unionOffset unionPtr |] [| return () |] kindOnly) |]
 
-instantiateStorable :: TH.Name -> TH.Q TH.Dec
+  (ptrArg, ptr) = (TH.VarP &&& pure . TH.VarE) (TH.mkName "ptr")
+  (selfArg, self) = (TH.VarP &&& pure . TH.VarE) (TH.mkName "self")
+  unionOffset = [| alignOffsetUp (sizeOf @F.CInt) (alignment @(F.Ptr ())) |]
+  implMethod methodName args body = TH.FunD methodName [TH.Clause args (TH.NormalB body) []]
+  kindOnly = all (null . snd) ctors
+
+instantiateStorable :: TH.Name -> TH.Q (Maybe TH.Dec)
 instantiateStorable typeName = TH.reify typeName >>= \case
   TH.TyConI (TH.DataD [] _ typeParamBinds Nothing ctors _) ->
-    storableForData typeName typeParams (map destructureCtor ctors)
+    Just <$> storableForData typeName typeParams (map destructureCtor ctors)
     where typeParams = map (TH.VarT . typeParamName) typeParamBinds
-  TH.TyConI (TH.TySynD _ [] typeSynonym) -> undefined
-  TH.TyConI (TH.NewtypeD [] _ [] Nothing ctor _) -> undefined
+  TH.TyConI (TH.TySynD _ [] typeSynonym) -> return Nothing
+  TH.TyConI (TH.NewtypeD [] _ [] Nothing ctor _) -> 
+    Just <$> storableForData typeName [] [destructureCtor ctor]
   typeInfo -> error [i|Type info not implemented: #{TH.pprint typeInfo}|]
 
 dbg :: TH.Q TH.Exp
 -- dbg = stringify . TH.pprint . (\(TH.ClassI (TH.ClassD _ _ _ [] decs)  _) -> decs) <$> TH.reify ''F.Storable
-dbg = stringify . TH.pprint <$> instantiateStorable ''Epsilon
--- dbg = stringify . generateBindings <$> collectBindings
+-- dbg = stringify . TH.pprint <$> instantiateStorable ''Epsilon
+dbg = stringify . generateBindings <$> (mapM bindingFromName =<< buildDeclOrder ''Term)
 -- dbg = stringify . show <$> inst
   where
         -- inst = [d|instance F.Storable a => F.Storable [a] where alignment _ = undefined|]

@@ -64,7 +64,7 @@ library
     Syntax
     TypeCheck
     Arbitrary
-    Export
+    Bindings
   
 executable pi-forall
   import: shared-properties
@@ -80,10 +80,10 @@ test-suite test-pi-forall
   hs-source-dirs: test
   main-is: Main.hs
 
-foreign-library pi-forall-shared
+foreign-library pi-forall-lib
   import: shared-properties
   type: native-shared
   build-depends: pi-forall
-  hs-source-dirs: src
+  hs-source-dirs: export
   other-modules: Export
-  c-sources: csrc/export.c
+  c-sources: export/export.c
