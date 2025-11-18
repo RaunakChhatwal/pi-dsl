@@ -14,7 +14,7 @@ import Data.Maybe ( catMaybes )
 import Environment (D (..), TcMonad)
 import Environment qualified as Env
 import Equal qualified
-import PrettyPrint (Disp (disp), pp, debug)
+import PrettyPrint (Disp (disp), debug)
 import Syntax
 import Debug.Trace
 

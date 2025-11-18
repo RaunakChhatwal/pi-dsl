@@ -2,7 +2,6 @@ module Bindings where
 
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
-import Foreign.C.String qualified as F
 import Language.Haskell.TH qualified as TH
 import Syntax (Epsilon, Term)
 import Unbound.Generics.LocallyNameless qualified as Unbound
@@ -60,7 +59,7 @@ buildDeclOrder :: TH.Name -> TH.Q [TH.Name]
 buildDeclOrder root = fst <$> runStateT (declOrderHelper $ TH.ConT root) Set.empty
 
 -- Primitive C types that map to ctypes
-data CType = CBool | CInt32 | CCharP
+data CType = CBool | CInt32 | CInt64 | CCharP
 
 -- Abstract representation of Python type expressions
 data TypeBinding =
@@ -96,8 +95,8 @@ type TypeParamName = TH.Name
 typeBinding :: TH.Type -> Reader [TypeParamName] TypeBinding
 typeBinding (TH.ConT typeName) = return $ case TH.nameBase typeName of
   "Bool" -> CType CBool
-  "Int" -> CType CInt32
-  "Integer" -> CType CInt32
+  "Int" -> CType CInt64
+  "Integer" -> CType CInt64
   "String" -> CType CCharP
   typeName -> TypeVar typeName
 typeBinding (TH.AppT a b) = App <$> typeBinding a <*> typeBinding b
@@ -108,11 +107,10 @@ typeBinding type' = error [i|Type not implemented: #{show type'}|]
 
 -- Convert CamelCase names to snake_case format
 snakeCase :: TH.Name -> String
-snakeCase typeName = map toLower $ go (TH.nameBase typeName)
-  where
-    go [] = []
-    go (c1:c2:cs) | isUpper c2 = c1 : '_' : go (c2 : cs)
-    go (c:cs) = c : go cs
+snakeCase typeName = map toLower $ go (TH.nameBase typeName) where
+  go [] = []
+  go (c1:c2:cs) | isUpper c2 = c1 : '_' : go (c2 : cs)
+  go (c:cs) = c : go cs
 
 -- Convert TH constructor to Python union field
 ctorBinding :: TH.Con -> Reader [TypeParamName] (Maybe Field)
@@ -168,9 +166,10 @@ unfoldApp fieldType = (fieldType, [])
 genTypeBinding :: TypeBinding -> String
 genTypeBinding List = "List"
 genTypeBinding Tuple = "Tuple"
-genTypeBinding (CType CBool) = "c_bool"
+genTypeBinding (CType CBool) = "Bool"
 genTypeBinding (CType CInt32) = "c_int32"
-genTypeBinding (CType CCharP) = "c_char_p"
+genTypeBinding (CType CInt64) = "Int"
+genTypeBinding (CType CCharP) = "String"
 genTypeBinding (TypeVar name) = name
 genTypeBinding (TypeArg index) = [i|type_args[#{index}]|]
 genTypeBinding (Pointer typeBinding) = [i|POINTER(#{genTypeBinding typeBinding})|]
@@ -192,36 +191,21 @@ genClassBinding (ClassBinding base name arity fields) = let
   fieldDecls = map ((indentation ++) . genField) fields
   in intercalate ('\n':indentation) $ case arity of
     0 -> [classDecl, "_fields_ = ["] ++ fieldDecls ++ ["]"]
-    _ -> [classDecl, methodDecl] ++ map (indentation ++) methodBody where
-      methodDecl = [i|def __class_getitem__(cls, type_args: #{typeArgsHint}) -> type:|]
+    _ -> classDecl : methodDecl ++ map (indentation ++) methodBody where
+      methodDecl = ["@classmethod", "@cache",
+        [i|def __class_getitem__(cls, type_args: #{typeArgsHint}) -> type:|]]
       typeArgsHint :: String = [i|tuple[#{intercalate ", " (replicate arity "type")}]|]
       methodBody = ["fields: list[tuple[str, type]] = ["] ++ fieldDecls ++ ["]", methodReturn]
       methodReturn = [i|return type("#{name}", (cls,), { "_fields_": fields })|]
 
--- Python List[T] class declaration
-listDecl :: String
-listDecl = "class List(Structure):\n\
-\    def __class_getitem__(cls, type_arg: type) -> type:\n\
-\        fields: list[tuple[str, type]] = [\n\
-\            (\"length\", c_size_t),\n\
-\            (\"data\", POINTER(type_arg))\n\
-\        ]\n\
-\        return type(\"List\", (cls,), { \"_fields_\": fields })"
-
--- Python Tuple[T1, T2, ...] class declaration
-tupleDecl :: String
-tupleDecl = "class Tuple(Structure):\n\
-\    def __class_getitem__(cls, type_args: tuple[type, ...]) -> type:\n\
-\        fields = [(f\"field{i}\", type_args[i]) for i in range(len(type_args))]\n\
-\        return type(\"Tuple\", (cls,), { \"_fields_\": fields })"
-
 -- Generate complete Python module with imports and class definitions
 generateBindings :: [Binding] -> String
-generateBindings bindings = intercalate "\n\n" (ctypesImport : decls) where
-  ctypesImport = [i|from ctypes import #{intercalate ", " importTypes}|]
-  importTypes =
-    ["c_bool", "c_int32", "c_char_p", "c_size_t", "c_void_p", "POINTER", "Structure", "Union"]
-  decls = [listDecl, tupleDecl] ++ structures ++ typeAliases ++ unions
+generateBindings bindings = intercalate "\n\n" (imports : decls) where
+  imports = intercalate "\n"
+    ["from ctypes import c_int32, c_void_p, Structure, Union",
+     "from functools import cache",
+     "from .base import Bool, Int, List, String, Tuple"]
+  decls = structures ++ typeAliases ++ unions
   structures = [genClassBinding structure | TaggedUnion _ structure <- bindings]
   typeAliases =
     [[i|#{typeName} = #{genTypeBinding typeDef}|] | TypeAlias typeName typeDef <- bindings]
@@ -246,13 +230,13 @@ fieldName i = TH.mkName ("field" ++ show i)
 
 offsetDecls :: [TH.Type] -> TH.Q [TH.Dec]
 offsetDecls [] = return []
-offsetDecls types = (++) <$> [d| offset0 = 0 |] <*> zipWithM offsetDecl [1..] typePairs where
+offsetDecls types = (++) <$> [d| offset0 = 0 |] <*> zipWithM offsetDecl [1..] prevCurrPairs where
   offsetDecl i (prevType, currType) = let
     prevOffset = return $ TH.VarE $ offsetName (i - 1)
     currOffset = return $ TH.VarP $ offsetName i
     offsetDef = [| alignOffsetUp ($prevOffset + sizeOf @($prevType)) (alignment @($currType)) |]
     in head <$> [d| $currOffset = $offsetDef |]
-  typePairs = zipWith (curry $ join bimap pure) types (tail types)
+  prevCurrPairs = zipWith (curry $ join bimap pure) types (tail types)
 
 peekMatchStmt :: Integer -> (TH.Name, [TH.Type]) -> TH.Q TH.Match
 peekMatchStmt kind (ctorName, paramTypes) = do
@@ -288,6 +272,9 @@ pokeMatchStmt kind (ctorName, paramTypes) = let
     returnStmt <- TH.NoBindS <$> [| return (kind, unionPtr) |]
     return $ TH.DoE Nothing (offsetDecls ++ [allocStmt] ++ pokeFieldStmts ++ [returnStmt])
 
+implMethod :: TH.Name -> [TH.Pat] -> TH.Exp -> TH.Dec
+implMethod methodName args body = TH.FunD methodName [TH.Clause args (TH.NormalB body) []]
+
 storableForData :: TH.Name -> [TH.Type] -> [(TH.Name, [TH.Type])] -> TH.Q TH.Dec
 storableForData typeName typeParams ctors =
   TH.InstanceD Nothing constraints <$> storable <*> decls where
@@ -317,17 +304,35 @@ storableForData typeName typeParams ctors =
   (ptrArg, ptr) = (TH.VarP &&& pure . TH.VarE) (TH.mkName "ptr")
   (selfArg, self) = (TH.VarP &&& pure . TH.VarE) (TH.mkName "self")
   unionOffset = [| alignOffsetUp (sizeOf @F.CInt) (alignment @(F.Ptr ())) |]
-  implMethod methodName args body = TH.FunD methodName [TH.Clause args (TH.NormalB body) []]
   kindOnly = all (null . snd) ctors
 
-instantiateStorable :: TH.Name -> TH.Q (Maybe TH.Dec)
-instantiateStorable typeName = TH.reify typeName >>= \case
+storableForAlias :: TH.Name -> (TH.Name, [TH.Type]) -> TH.Q TH.Dec
+storableForAlias typeName (ctorName, [wrappedType]) =
+  TH.InstanceD Nothing [] storable <$> decls where
+  decls = sequence [alignmentImpl, sizeOfImpl, peekImpl, pokeImpl]
+  storable = TH.AppT (TH.ConT ''F.Storable) (TH.ConT typeName)
+
+  alignmentImpl = implMethod 'F.alignment [TH.WildP] <$> [| alignment @($(pure wrappedType)) |]
+  sizeOfImpl = implMethod 'F.sizeOf [TH.WildP] <$> [| sizeOf @($(pure wrappedType)) |]
+
+  peekImpl = implMethod 'F.peek [ptrArg] <$>
+    [| $(pure $ TH.ConE ctorName) <$> F.peek (F.castPtr $ptr) |]
+
+  pokeImpl = implMethod 'F.poke [ptrArg, TH.ConP ctorName [] [xArg]] <$>
+    [| F.poke (F.castPtr $ptr) $x |]
+
+  (ptrArg, ptr) = (TH.VarP &&& pure . TH.VarE) (TH.mkName "ptr")
+  (xArg, x) = (TH.VarP &&& pure . TH.VarE) (TH.mkName "x")
+storableForAlias _ _ = undefined
+
+implStorable :: TH.Name -> TH.Q (Maybe TH.Dec)
+implStorable typeName = TH.reify typeName >>= \case
   TH.TyConI (TH.DataD [] _ typeParamBinds Nothing ctors _) ->
     Just <$> storableForData typeName typeParams (map destructureCtor ctors)
     where typeParams = map (TH.VarT . typeParamName) typeParamBinds
   TH.TyConI (TH.TySynD _ [] typeSynonym) -> return Nothing
-  TH.TyConI (TH.NewtypeD [] _ [] Nothing ctor _) -> 
-    Just <$> storableForData typeName [] [destructureCtor ctor]
+  TH.TyConI (TH.NewtypeD [] _ [] Nothing ctor _) ->
+    Just <$> storableForAlias typeName (destructureCtor ctor)
   typeInfo -> error [i|Type info not implemented: #{TH.pprint typeInfo}|]
 
 dbg :: TH.Q TH.Exp

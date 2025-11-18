@@ -1,7 +1,7 @@
 {- pi-forall language -}
 
 -- | A Pretty Printer.
-module PrettyPrint (Disp (..), D (..), SourcePos, PP.Doc, PP.render, pp, debug) where
+module PrettyPrint (Disp (..), D (..), SourcePos, PP.Doc, PP.render, ppr, debug) where
 
 import Control.Monad.Reader (MonadReader (ask, local), asks)
 import Data.Set qualified as S
@@ -34,8 +34,8 @@ class Disp d where
   debugDisp d = display d initDI{showLongNames = True, showAnnots=True}
 
 -- | Convenience entry point for the pretty printer
-pp :: Disp d => d -> String
-pp p = PP.render (disp p)
+ppr :: Disp d => d -> String
+ppr p = PP.render (disp p)
 
 debug :: Disp d => d -> String
 debug p = PP.render (debugDisp p)
