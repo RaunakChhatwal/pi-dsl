@@ -47,3 +47,9 @@ class String(List[Char]):
 
 Bool = ctypes.c_bool
 Int = ctypes.c_int64
+
+def init_tagged_union[T](cls: type[T], kind: int, value: object) -> T:
+    instance = cls()
+    setattr(instance, "kind", ctypes.c_int32(kind))
+    setattr(instance, "union", ctypes.cast(ctypes.pointer(value), c_void_p))
+    return instance

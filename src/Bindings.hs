@@ -173,19 +173,18 @@ genBinding (TaggedUnion name arity unionFields kindConstants) = let
     "    (\"kind\", c_int32),",
     "    (\"union\", c_void_p)",
     "]" ]
-  initMethods = concatMap (genInitMethod . second genTypeBinding) unionFields
   genInitMethod (fieldName, fieldType) =
     [[i|@classmethod|],
      [i|def init_#{fieldName}(cls, value: #{fieldType}):|],
-     [i|    instance = cls()|],
-     [i|    instance.kind = cls.KIND_#{map toUpper fieldName}|],
-     [i|    instance.union = cast(pointer(value), c_void_p)|],
-     [i|    return instance|]]
+     [i|    return init_tagged_union(cls, cls.KIND_#{map toUpper fieldName}, value)|]]
+  initMethods = map (genInitMethod . second genTypeBinding) unionFields
   in Right $ intercalate ('\n':indentation) $ case arity of
-  0 -> [i|class #{name}(Structure):|] : fieldDecl ++ kindDecls ++ initMethods
-  _ -> classDecl : decls where
+  0 -> classDecl : intercalate [""] decls where
+    decls = [kindDecls, fieldDecl] ++ initMethods
+    classDecl = [i|class #{name}(Structure):|]
+  _ -> classDecl : intercalate [""] decls where
+    decls = [kindDecls, fieldDecl, classGetItemImpl] ++ initMethods
     classDecl = [i|class #{name}[#{intercalate ", " typeArgs}](Structure):|]
-    decls = fieldDecl ++ kindDecls ++ classGetItemImpl ++ initMethods
     classGetItemImpl = ["@classmethod", "@cache",
       [i|def __class_getitem__(cls, type_args: tuple[#{tupleTypeArgs}]) -> type:|],
       [i|    return type("#{name}", (cls,), { "type_args": type_args })|]]
@@ -198,9 +197,9 @@ generateBindings bindings = intercalate "\n\n" (imports : classes ++ aliases) wh
   (aliases, classes) = partitionEithers (map genBinding bindings)
   imports = intercalate "\n"
     ["from __future__ import annotations",
-     "from ctypes import c_int32, c_void_p, cast, pointer, Structure",
+     "from ctypes import c_int32, c_void_p, Structure",
      "from functools import cache",
-     "from .base import Bool, Int, List, String, Tuple"]
+     "from .base import Bool, init_tagged_union, Int, List, String, Tuple"]
 
 alignOffsetUp :: Int -> Int -> Int
 alignOffsetUp offset alignment =
