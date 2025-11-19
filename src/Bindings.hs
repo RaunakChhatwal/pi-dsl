@@ -17,10 +17,11 @@ import Data.String.Interpolate (i)
 import Control.Monad.Reader (asks, Reader, runReader)
 import Control.Monad.State (StateT (runStateT), get, modify, lift)
 import Control.Exception (assert)
-import Data.Char (toLower, isUpper)
+import Data.Char (toLower, isUpper, toUpper)
 import Control.Monad (zipWithM, join)
 import Control.Arrow ((&&&))
 import Data.Bool (bool)
+import Data.Either (partitionEithers)
 
 destructureCtor :: TH.Con -> (TH.Name, [TH.Type])
 destructureCtor (TH.NormalC name params) = (name, map snd params)
@@ -77,16 +78,13 @@ data Base = Union | Structure deriving Show
 -- Python class field: (field_name, field_type)
 type Field = (String, TypeBinding)
 
--- Python class definition with fields and generic parameters
-data ClassBinding = ClassBinding {
-  base :: Base,
+data Binding = TypeAlias String TypeBinding | TaggedUnion {
   name :: String,
   arity :: Int,
-  fields :: [Field]
+  structFields :: [Field],
+  unionFields :: Maybe [Field],
+  kindConstants :: [String]
 }
-
--- Complete binding: tagged union or type alias
-data Binding = TaggedUnion (Maybe ClassBinding) ClassBinding | TypeAlias String TypeBinding
 
 -- Type parameter names for generic type resolution
 type TypeParamName = TH.Name
@@ -134,16 +132,16 @@ dataBinding :: TH.Name -> [TH.TyVarBndr a] -> [TH.Con] -> Binding
 dataBinding typeName typeParams ctors = let
   name = TH.nameBase typeName
   arity = length typeParams
-  typeParamNames = map typeParamName typeParams
-  unionFields = runReader (catMaybes <$> mapM ctorBinding ctors) typeParamNames
-  union = ClassBinding Union [i|#{name}Union|] arity unionFields
   kind = ("kind", CType CInt32)
   structFields = [kind, ([i|#{snakeCase typeName}_union|], Pointer (TypeVar [i|#{name}Union|]))]
-  structure = ClassBinding Structure name arity structFields
+  typeParamNames = map typeParamName typeParams
+  unionFields = runReader (catMaybes <$> mapM ctorBinding ctors) typeParamNames
+  kindConstants =
+    [[i|KIND_#{map toUpper $ snakeCase ctorName}|] | (ctorName, _) <- map destructureCtor ctors]
   in case unionFields of
-  [] -> TaggedUnion Nothing $ structure { fields = [kind] }
-  [field] -> TaggedUnion Nothing $ structure { fields = [kind, second Pointer field] }
-  _ -> TaggedUnion (Just union) structure
+  [] -> TaggedUnion name arity [kind] Nothing kindConstants
+  [field] -> TaggedUnion name arity [kind, second Pointer field] Nothing kindConstants
+  _ -> TaggedUnion name arity structFields (Just unionFields) kindConstants
 
 -- Generate complete Python binding from Haskell type name
 bindingFromName :: TH.Name -> TH.Q Binding
@@ -183,33 +181,45 @@ genField (fieldName, Pointer fieldType) =
   [i|("#{fieldName}", c_void_p), \# #{genTypeBinding fieldType}|]
 genField (fieldName, fieldType) = [i|("#{fieldName}", #{genTypeBinding fieldType}),|]
 
--- Generate complete Python class definition
-genClassBinding :: ClassBinding -> String
-genClassBinding (ClassBinding base name arity fields) = let
-  classDecl = [i|class #{name}(#{base}):|]
+genClass :: String -> String -> Int -> [Field] -> [String] -> [Field] -> String
+genClass name base arity fields kindConstants innerFields = let
   indentation = "    "
-  fieldDecls = map ((indentation ++) . genField) fields
+  indent = (indentation ++)
+  kindDecls = [[i|#{constant} = #{index}|] | (index, constant) <- zip [0::Int ..] kindConstants]
+  fieldDecls = map (indent . genField) fields
   in intercalate ('\n':indentation) $ case arity of
-    0 -> [classDecl, "_fields_ = ["] ++ fieldDecls ++ ["]"]
-    _ -> classDecl : methodDecl ++ map (indentation ++) methodBody where
-      methodDecl = ["@classmethod", "@cache",
-        [i|def __class_getitem__(cls, type_args: #{typeArgsHint}) -> type:|]]
-      typeArgsHint :: String = [i|tuple[#{intercalate ", " (replicate arity "type")}]|]
-      methodBody = ["fields: list[tuple[str, type]] = ["] ++ fieldDecls ++ ["]", methodReturn]
-      methodReturn = [i|return type("#{name}", (cls,), { "_fields_": fields })|]
+  0 -> [i|class #{name}(#{base}):|] : decls where
+    decls = kindDecls ++ ["_fields_ = ["] ++ fieldDecls ++ ["]"]
+  _ -> classDecl : decls where
+    classDecl = [i|class #{name}[#{intercalate ", " typeArgs}](#{base}):|]
+    decls = kindDecls ++ methodDecl ++ map indent methodBody
+    typeArgs = ["T" ++ show i | i <- [1..arity]]
+    methodDecl = ["@classmethod", "@cache",
+      [i|def __class_getitem__(cls, type_args: tuple[#{tupleTypeArgs}]) -> type:|]]
+    tupleTypeArgs = intercalate ", " [[i|type[#{typeArg}]|] | typeArg <- typeArgs]
+    methodBody = ["fields: list[tuple[str, type]] = ["] ++ fieldDecls ++ ["]", methodReturn]
+    methodReturn = [i|return type("#{name}", (cls,), { "_fields_": fields })|]
+
+genBinding :: Binding -> Either String (String, Maybe String)
+genBinding (TypeAlias typeName typeDef) = Left [i|#{typeName} = #{genTypeBinding typeDef}|]
+genBinding (TaggedUnion name arity [kind] Nothing kindConstants) =
+  Right (genClass name "Structure" arity [kind] kindConstants [], Nothing)
+genBinding (TaggedUnion name arity structFields Nothing kindConstants) =
+  Right (genClass name "Structure" arity structFields kindConstants (tail structFields), Nothing)
+genBinding (TaggedUnion name arity structFields (Just unionFields) kindConstants) =
+  Right (structure, Just union) where
+  structure = genClass name "Structure" arity structFields kindConstants unionFields
+  union = genClass (name ++ "Union") "Union" arity unionFields [] []
 
 -- Generate complete Python module with imports and class definitions
 generateBindings :: [Binding] -> String
 generateBindings bindings = intercalate "\n\n" (imports : decls) where
+  decls = structures ++ typeAliases ++ catMaybes unions
   imports = intercalate "\n"
     ["from ctypes import c_int32, c_void_p, Structure, Union",
      "from functools import cache",
      "from .base import Bool, Int, List, String, Tuple"]
-  decls = structures ++ typeAliases ++ unions
-  structures = [genClassBinding structure | TaggedUnion _ structure <- bindings]
-  typeAliases =
-    [[i|#{typeName} = #{genTypeBinding typeDef}|] | TypeAlias typeName typeDef <- bindings]
-  unions = [genClassBinding union | TaggedUnion (Just union) _ <- bindings]
+  (typeAliases, (structures, unions)) = second unzip $ partitionEithers (map genBinding bindings)
 
 alignOffsetUp :: Int -> Int -> Int
 alignOffsetUp offset alignment =
