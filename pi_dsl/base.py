@@ -1,9 +1,13 @@
 import ctypes
 from ctypes import c_size_t, c_void_p, Structure
 from functools import cache
-from typing import Any
 
 class List[T](Structure):
+    _fields_ = [
+        ("length", c_size_t),
+        ("data", c_void_p)
+    ]
+
     def __init__(self, items: list[T]):
         self.length = len(items)
         array_type = self.item_type * len(items)
@@ -12,21 +16,14 @@ class List[T](Structure):
     @classmethod
     @cache
     def __class_getitem__(cls, item_type: type[T]) -> type:
-        fields: list[tuple[str, type]] = [
-            ("length", c_size_t),
-            ("data", c_void_p)
-        ]
-
-        return type("List", (cls,), { "item_type": item_type, "_fields_": fields })
+        return type("List", (cls,), { "item_type": item_type })
 
     def get(self) -> list[T]:
         array_type = self.item_type * self.length
         return list(array_type.from_address(self.data))
 
-class Tuple(Structure):
-    _fields_ = []
-
-    def __init__(self, *items: Any):
+class Tuple[*Ts](Structure):
+    def __init__(self, *items: *Ts):
         for i, item in enumerate(items):
             setattr(self, f"field{i}", item)
 
@@ -36,7 +33,7 @@ class Tuple(Structure):
         fields = [(f"field{i}", item[i]) for i in range(len(item))]
         return type("Tuple", (cls,), { "_fields_": fields })
 
-    def get(self) -> tuple[Any, ...]:
+    def get(self) -> tuple[*Ts]:
         return tuple(getattr(self, f"field{i}") for i in range(len(self._fields_)))
 
 Char = ctypes.c_int32

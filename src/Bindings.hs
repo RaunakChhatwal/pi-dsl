@@ -60,16 +60,15 @@ buildDeclOrder :: TH.Name -> TH.Q [TH.Name]
 buildDeclOrder root = fst <$> runStateT (declOrderHelper $ TH.ConT root) Set.empty
 
 -- Primitive C types that map to ctypes
-data CType = CBool | CInt32 | CInt64 | CCharP
+data BaseType = Bool | Int | String deriving Show
 
 -- Abstract representation of Python type expressions
 data TypeBinding =
   List
   | Tuple
-  | CType CType
+  | BaseType BaseType
   | TypeVar String
   | TypeArg Int
-  | Pointer TypeBinding
   | App TypeBinding TypeBinding
 
 -- Base class type for Python ctypes
@@ -81,8 +80,7 @@ type Field = (String, TypeBinding)
 data Binding = TypeAlias String TypeBinding | TaggedUnion {
   name :: String,
   arity :: Int,
-  structFields :: [Field],
-  unionFields :: Maybe [Field],
+  unionFields :: [Field],
   kindConstants :: [String]
 }
 
@@ -92,10 +90,10 @@ type TypeParamName = TH.Name
 -- Convert TH Type to TypeBinding, resolving type parameters
 typeBinding :: TH.Type -> Reader [TypeParamName] TypeBinding
 typeBinding (TH.ConT typeName) = return $ case TH.nameBase typeName of
-  "Bool" -> CType CBool
-  "Int" -> CType CInt64
-  "Integer" -> CType CInt64
-  "String" -> CType CCharP
+  "Bool" -> BaseType Bool
+  "Int" -> BaseType Int
+  "Integer" -> BaseType Int
+  "String" -> BaseType String
   typeName -> TypeVar typeName
 typeBinding (TH.AppT a b) = App <$> typeBinding a <*> typeBinding b
 typeBinding (TH.TupleT {}) = return Tuple
@@ -129,19 +127,13 @@ typeParamName (TH.KindedTV name _ _) = name
 
 -- Generate binding for data types with constructors
 dataBinding :: TH.Name -> [TH.TyVarBndr a] -> [TH.Con] -> Binding
-dataBinding typeName typeParams ctors = let
-  name = TH.nameBase typeName
-  arity = length typeParams
-  kind = ("kind", CType CInt32)
-  structFields = [kind, ([i|#{snakeCase typeName}_union|], Pointer (TypeVar [i|#{name}Union|]))]
-  typeParamNames = map typeParamName typeParams
-  unionFields = runReader (catMaybes <$> mapM ctorBinding ctors) typeParamNames
+dataBinding typeName typeParams ctors = TaggedUnion name arity unionFields kindConstants where
   kindConstants =
     [[i|KIND_#{map toUpper $ snakeCase ctorName}|] | (ctorName, _) <- map destructureCtor ctors]
-  in case unionFields of
-  [] -> TaggedUnion name arity [kind] Nothing kindConstants
-  [field] -> TaggedUnion name arity [kind, second Pointer field] Nothing kindConstants
-  _ -> TaggedUnion name arity structFields (Just unionFields) kindConstants
+  unionFields = runReader (catMaybes <$> mapM ctorBinding ctors) typeParamNames
+  typeParamNames = map typeParamName typeParams
+  arity = length typeParams
+  name = TH.nameBase typeName
 
 -- Generate complete Python binding from Haskell type name
 bindingFromName :: TH.Name -> TH.Q Binding
@@ -164,62 +156,51 @@ unfoldApp fieldType = (fieldType, [])
 genTypeBinding :: TypeBinding -> String
 genTypeBinding List = "List"
 genTypeBinding Tuple = "Tuple"
-genTypeBinding (CType CBool) = "Bool"
-genTypeBinding (CType CInt32) = "c_int32"
-genTypeBinding (CType CInt64) = "Int"
-genTypeBinding (CType CCharP) = "String"
+genTypeBinding (BaseType baseType) = show baseType
 genTypeBinding (TypeVar name) = name
-genTypeBinding (TypeArg index) = [i|type_args[#{index}]|]
-genTypeBinding (Pointer typeBinding) = [i|POINTER(#{genTypeBinding typeBinding})|]
+genTypeBinding (TypeArg index) = "T" ++ show (index + 1)
 genTypeBinding (App a b) =
   [i|#{genTypeBinding typeCtor}[#{intercalate ", " (map genTypeBinding typeArgs)}]|]
   where (typeCtor, typeArgs) = unfoldApp (App a b)
 
--- Generate Python field tuple, using c_void_p for pointers
-genField :: (String, TypeBinding) -> String
-genField (fieldName, Pointer fieldType) =
-  [i|("#{fieldName}", c_void_p), \# #{genTypeBinding fieldType}|]
-genField (fieldName, fieldType) = [i|("#{fieldName}", #{genTypeBinding fieldType}),|]
-
-genClass :: String -> String -> Int -> [Field] -> [String] -> [Field] -> String
-genClass name base arity fields kindConstants innerFields = let
-  indentation = "    "
-  indent = (indentation ++)
-  kindDecls = [[i|#{constant} = #{index}|] | (index, constant) <- zip [0::Int ..] kindConstants]
-  fieldDecls = map (indent . genField) fields
-  in intercalate ('\n':indentation) $ case arity of
-  0 -> [i|class #{name}(#{base}):|] : decls where
-    decls = kindDecls ++ ["_fields_ = ["] ++ fieldDecls ++ ["]"]
-  _ -> classDecl : decls where
-    classDecl = [i|class #{name}[#{intercalate ", " typeArgs}](#{base}):|]
-    decls = kindDecls ++ methodDecl ++ map indent methodBody
-    typeArgs = ["T" ++ show i | i <- [1..arity]]
-    methodDecl = ["@classmethod", "@cache",
-      [i|def __class_getitem__(cls, type_args: tuple[#{tupleTypeArgs}]) -> type:|]]
-    tupleTypeArgs = intercalate ", " [[i|type[#{typeArg}]|] | typeArg <- typeArgs]
-    methodBody = ["fields: list[tuple[str, type]] = ["] ++ fieldDecls ++ ["]", methodReturn]
-    methodReturn = [i|return type("#{name}", (cls,), { "_fields_": fields })|]
-
-genBinding :: Binding -> Either String (String, Maybe String)
+genBinding :: Binding -> Either String String
 genBinding (TypeAlias typeName typeDef) = Left [i|#{typeName} = #{genTypeBinding typeDef}|]
-genBinding (TaggedUnion name arity [kind] Nothing kindConstants) =
-  Right (genClass name "Structure" arity [kind] kindConstants [], Nothing)
-genBinding (TaggedUnion name arity structFields Nothing kindConstants) =
-  Right (genClass name "Structure" arity structFields kindConstants (tail structFields), Nothing)
-genBinding (TaggedUnion name arity structFields (Just unionFields) kindConstants) =
-  Right (structure, Just union) where
-  structure = genClass name "Structure" arity structFields kindConstants unionFields
-  union = genClass (name ++ "Union") "Union" arity unionFields [] []
+genBinding (TaggedUnion name arity unionFields kindConstants) = let
+  indentation = "    "
+  kindDecls = [[i|#{constant} = #{index}|] | (index, constant) <- zip [0::Int ..] kindConstants]
+  fieldDecl = [
+    "_fields_ = [",
+    "    (\"kind\", c_int32),",
+    "    (\"union\", c_void_p)",
+    "]" ]
+  initMethods = concatMap (genInitMethod . second genTypeBinding) unionFields
+  genInitMethod (fieldName, fieldType) =
+    [[i|@classmethod|],
+     [i|def init_#{fieldName}(cls, value: #{fieldType}):|],
+     [i|    instance = cls()|],
+     [i|    instance.kind = cls.KIND_#{map toUpper fieldName}|],
+     [i|    instance.union = cast(pointer(value), c_void_p)|],
+     [i|    return instance|]]
+  in Right $ intercalate ('\n':indentation) $ case arity of
+  0 -> [i|class #{name}(Structure):|] : fieldDecl ++ kindDecls ++ initMethods
+  _ -> classDecl : decls where
+    classDecl = [i|class #{name}[#{intercalate ", " typeArgs}](Structure):|]
+    decls = fieldDecl ++ kindDecls ++ classGetItemImpl ++ initMethods
+    classGetItemImpl = ["@classmethod", "@cache",
+      [i|def __class_getitem__(cls, type_args: tuple[#{tupleTypeArgs}]) -> type:|],
+      [i|    return type("#{name}", (cls,), { "type_args": type_args })|]]
+    tupleTypeArgs = intercalate ", " [[i|type[#{typeArg}]|] | typeArg <- typeArgs]
+    typeArgs = ["T" ++ show i | i <- [1..arity]]
 
 -- Generate complete Python module with imports and class definitions
 generateBindings :: [Binding] -> String
-generateBindings bindings = intercalate "\n\n" (imports : decls) where
-  decls = structures ++ typeAliases ++ catMaybes unions
+generateBindings bindings = intercalate "\n\n" (imports : classes ++ aliases) where
+  (aliases, classes) = partitionEithers (map genBinding bindings)
   imports = intercalate "\n"
-    ["from ctypes import c_int32, c_void_p, Structure, Union",
+    ["from __future__ import annotations",
+     "from ctypes import c_int32, c_void_p, cast, pointer, Structure",
      "from functools import cache",
      "from .base import Bool, Int, List, String, Tuple"]
-  (typeAliases, (structures, unions)) = second unzip $ partitionEithers (map genBinding bindings)
 
 alignOffsetUp :: Int -> Int -> Int
 alignOffsetUp offset alignment =
@@ -292,29 +273,26 @@ storableForData typeName typeParams ctors =
   storable = TH.AppT (TH.ConT ''F.Storable) <$> selfType
   constraints = map (TH.AppT $ TH.ConT ''F.Storable) typeParams
 
-  alignmentImpl = implMethod 'F.alignment [TH.WildP] <$> if kindOnly
-    then [| alignment @F.CInt |]
-    else [| max (alignment @F.CInt) (alignment @(F.Ptr ())) |]
+  alignmentImpl = implMethod 'F.alignment [TH.WildP] <$>
+    [| max (alignment @F.CInt) (alignment @(F.Ptr ())) |]
 
-  sizeOfImpl = implMethod 'F.sizeOf [TH.WildP] <$> if kindOnly
-    then [| sizeOf @F.CInt |]
-    else [| alignOffsetUp ($unionOffset + sizeOf @(F.Ptr ())) (alignment @($selfType)) |]
+  sizeOfImpl = implMethod 'F.sizeOf [TH.WildP] <$>
+    [| alignOffsetUp ($unionOffset + sizeOf @(F.Ptr ())) (alignment @($selfType)) |]
   selfType = pure $ foldl TH.AppT (TH.ConT typeName) typeParams
 
   peekImpl = implMethod 'F.peek [ptrArg] <$> [| do
     kind :: F.CInt <- F.peekByteOff $ptr 0
-    unionPtr <- $(bool [| F.peekByteOff $ptr $unionOffset |] [| return undefined |] kindOnly)
+    unionPtr :: F.Ptr () <- F.peekByteOff $ptr $unionOffset
     $(TH.CaseE <$> [|kind|] <*> zipWithM peekMatchStmt [0..] ctors) |]
 
   pokeImpl = implMethod 'F.poke [ptrArg, selfArg] <$> [| do
     (kind :: F.CInt, unionPtr) <- $(TH.CaseE <$> self <*> zipWithM pokeMatchStmt [0..] ctors)
     F.pokeByteOff $ptr 0 kind
-    $(bool [| F.pokeByteOff $ptr $unionOffset unionPtr |] [| return () |] kindOnly) |]
+    F.pokeByteOff $ptr $unionOffset unionPtr |]
 
   (ptrArg, ptr) = (TH.VarP &&& pure . TH.VarE) (TH.mkName "ptr")
   (selfArg, self) = (TH.VarP &&& pure . TH.VarE) (TH.mkName "self")
   unionOffset = [| alignOffsetUp (sizeOf @F.CInt) (alignment @(F.Ptr ())) |]
-  kindOnly = all (null . snd) ctors
 
 storableForAlias :: TH.Name -> (TH.Name, [TH.Type]) -> TH.Q TH.Dec
 storableForAlias typeName (ctorName, [wrappedType]) =
