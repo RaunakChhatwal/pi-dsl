@@ -57,13 +57,9 @@ library
   exposed-modules: 
     Environment
     Equal
-    LayoutToken
-    Modules
-    Parser
     PrettyPrint
     Syntax
     TypeCheck
-    Arbitrary
     Bindings
   
 executable pi-forall
