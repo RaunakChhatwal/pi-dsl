@@ -9,7 +9,7 @@ import Data.Set qualified as Set
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic,from)
 import GHC.Base (MonadPlus)
-import Text.ParserCombinators.Parsec.Pos (SourcePos, initialPos, newPos)
+-- import Text.ParserCombinators.Parsec.Pos (SourcePos, initialPos, newPos)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Unbound.Generics.LocallyNameless.Internal.Fold qualified as Unbound
 
@@ -54,8 +54,6 @@ data Term
     TyPi Epsilon Type (Unbound.Bind TName Type)
   | -- | annotated terms `( a : A )`
     Ann Term Type
-  | -- | marked source position, for error messages
-    Pos SourcePos Term
   | -- | an axiom 'TRUSTME', inhabits all types
     TrustMe
   | -- | a directive to the type checker to print out the current context
@@ -196,7 +194,7 @@ data ConstructorNames = ConstructorNames
   deriving (Show, Eq, Ord, Generic, Typeable)
 
 -- | A Data constructor has a name and a telescope of arguments
-data ConstructorDef = ConstructorDef SourcePos DataConName Telescope
+data ConstructorDef = ConstructorDef DataConName Telescope
   deriving (Show, Generic)
   deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
@@ -216,7 +214,6 @@ newtype Telescope = Telescope [Entry]
 
 -- | Is this the syntax of a literal (natural) number
 isNumeral :: Term -> Maybe Int
-isNumeral (Pos _ t) = isNumeral t
 isNumeral (DataCon c []) | c == "Zero" = Just 0
 isNumeral (DataCon c [Arg _ t]) | c == "Succ" =
   do n <- isNumeral t; return (n + 1)
@@ -260,25 +257,21 @@ preludeDataDecls =
   , Data boolName   (Telescope []) [falseConstructorDef, trueConstructorDef]
   ]  where
         -- boolean
-        trueConstructorDef = ConstructorDef internalPos trueName (Telescope [])
-        falseConstructorDef = ConstructorDef internalPos falseName (Telescope [])
+        trueConstructorDef = ConstructorDef trueName (Telescope [])
+        falseConstructorDef = ConstructorDef falseName (Telescope [])
 
         -- unit
-        unitConstructorDef = ConstructorDef internalPos litUnitName (Telescope []) 
+        unitConstructorDef = ConstructorDef litUnitName (Telescope []) 
 
         -- Sigma-type
         sigmaTele = Telescope [declA, declB]
-        prodConstructorDef = ConstructorDef internalPos prodName (Telescope [declX, declY])
+        prodConstructorDef = ConstructorDef prodName (Telescope [declX, declY])
         declA = mkDecl aName TyType
         declB = mkDecl bName (TyPi Rel (Var aName) (Unbound.bind xName TyType))
         declX = mkDecl xName (Var aName)
         declY = mkDecl yName (App (Var bName) (Arg Rel (Var xName)))
         aName = Unbound.string2Name "a"
         bName = Unbound.string2Name "b"
-
-        internalPos :: SourcePos
-        internalPos = initialPos "prelude"
-
 
 
 -----------------------------------------
@@ -288,18 +281,17 @@ preludeDataDecls =
 
 -- | Remove source positions and type annotations from the top level of a term
 strip :: Term -> Term
-strip (Pos _ tm) = strip tm
 strip (Ann tm _) = strip tm
 strip tm = tm
 
--- | Partial inverse of Pos
-unPos :: Term -> Maybe SourcePos
-unPos (Pos p _) = Just p
-unPos _ = Nothing
+-- -- | Partial inverse of Pos
+-- unPos :: Term -> Maybe SourcePos
+-- unPos (Pos p _) = Just p
+-- unPos _ = Nothing
 
--- | Tries to find a Pos inside a term, otherwise just gives up.
-unPosFlaky :: Term -> SourcePos
-unPosFlaky t = fromMaybe (newPos "unknown location" 0 0) (unPos t)
+-- -- | Tries to find a Pos inside a term, otherwise just gives up.
+-- unPosFlaky :: Term -> SourcePos
+-- unPosFlaky t = fromMaybe (newPos "unknown location" 0 0) (unPos t)
 
 
 
@@ -419,33 +411,6 @@ pi2 = TyPi Rel TyBool (Unbound.bind yName (Var yName))
 -- >>> Unbound.aeq (Unbound.subst xName TyBool pi1) pi2
 
 -----------------
-
--- * Source Positions
-
--- SourcePositions do not have an instance of the Generic class available
--- so we cannot automatically define their `Alpha` and `Subst` instances. 
--- Instead we provide a trivial implementation here. 
-instance Unbound.Alpha SourcePos where
-  aeq' _ _ _ = True
-  fvAny' _ _ = pure
-  open _ _ = id
-  close _ _ = id
-  isPat _ = mempty
-  isTerm _ = mempty
-  nthPatFind _ = mempty
-  namePatFind _ = mempty
-  swaps' _ _ = id
-  freshen' _ x = return (x, mempty)
-  lfreshen' _ x cont = cont x mempty
-  acompare' _ _ _ = EQ
-
--- Substitutions ignore source positions
-instance Unbound.Subst b SourcePos where 
-    subst _ _ = id
-    substs _ = id
-    substBvs _ _ = id
-
-
 
 -- * Constructor Names
 

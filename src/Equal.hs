@@ -176,9 +176,8 @@ whnf (LetPair a bnd) = do
       whnf (Unbound.instantiate bnd [b1, c])
     _ -> return (LetPair nf bnd)
 
--- ignore/remove type annotations and source positions when normalizing  
+-- ignore/remove type annotations when normalizing  
 whnf (Ann tm _) = whnf tm
-whnf (Pos _ tm) = whnf tm
  
 whnf (Let rhs bnd)  = do
   whnf (instantiate bnd rhs)  

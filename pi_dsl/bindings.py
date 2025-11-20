@@ -63,18 +63,6 @@ class Arg(Structure):
     def init_arg(cls, value: Tuple[Epsilon, Term]):
         return init_tagged_union(cls, cls.KIND_ARG, value)
 
-class SourcePos(Structure):
-    KIND_SOURCE_POS = 0
-    
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
-    
-    @classmethod
-    def init_source_pos(cls, value: Tuple[SourceName, Line, Column]):
-        return init_tagged_union(cls, cls.KIND_SOURCE_POS, value)
-
 class Pattern(Structure):
     KIND_PAT_CON = 0
     KIND_PAT_VAR = 1
@@ -99,25 +87,24 @@ class Term(Structure):
     KIND_APP = 3
     KIND_TY_PI = 4
     KIND_ANN = 5
-    KIND_POS = 6
-    KIND_TRUST_ME = 7
-    KIND_PRINT_ME = 8
-    KIND_LET = 9
-    KIND_TY_UNIT = 10
-    KIND_LIT_UNIT = 11
-    KIND_TY_BOOL = 12
-    KIND_LIT_BOOL = 13
-    KIND_IF = 14
-    KIND_TY_SIGMA = 15
-    KIND_PROD = 16
-    KIND_LET_PAIR = 17
-    KIND_TY_EQ = 18
-    KIND_REFL = 19
-    KIND_SUBST = 20
-    KIND_CONTRA = 21
-    KIND_TY_CON = 22
-    KIND_DATA_CON = 23
-    KIND_CASE = 24
+    KIND_TRUST_ME = 6
+    KIND_PRINT_ME = 7
+    KIND_LET = 8
+    KIND_TY_UNIT = 9
+    KIND_LIT_UNIT = 10
+    KIND_TY_BOOL = 11
+    KIND_LIT_BOOL = 12
+    KIND_IF = 13
+    KIND_TY_SIGMA = 14
+    KIND_PROD = 15
+    KIND_LET_PAIR = 16
+    KIND_TY_EQ = 17
+    KIND_REFL = 18
+    KIND_SUBST = 19
+    KIND_CONTRA = 20
+    KIND_TY_CON = 21
+    KIND_DATA_CON = 22
+    KIND_CASE = 23
     
     _fields_ = [
         ("kind", c_int32),
@@ -143,10 +130,6 @@ class Term(Structure):
     @classmethod
     def init_ann(cls, value: Tuple[Term, Type]):
         return init_tagged_union(cls, cls.KIND_ANN, value)
-    
-    @classmethod
-    def init_pos(cls, value: Tuple[SourcePos, Term]):
-        return init_tagged_union(cls, cls.KIND_POS, value)
     
     @classmethod
     def init_let(cls, value: Tuple[Term, Bind[TName, Term]]):
@@ -199,12 +182,6 @@ class Term(Structure):
 TName = Name[Term]
 
 Type = Term
-
-SourceName = String
-
-Line = Int
-
-Column = Int
 
 TyConName = String
 

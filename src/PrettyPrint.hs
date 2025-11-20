@@ -193,9 +193,9 @@ instance Display Entry where
   
 
 instance Display ConstructorDef where
-  display (ConstructorDef _ c (Telescope [])) = do
+  display (ConstructorDef c (Telescope [])) = do
     pure $ PP.text c 
-  display (ConstructorDef _ c tele) = do
+  display (ConstructorDef c tele) = do
     dc <- display c
     dt <- display tele
     pure $ dc <+> PP.text "of" <+> dt 
@@ -372,7 +372,6 @@ instance Display Term where
       db <- withPrec 0 (display b)
       return $ PP.parens (da <+> PP.text ":" <+> db)
       else display a
-  display (Pos _ e) = display e
   display TrustMe = do
     return $ PP.text "TRUSTME"
   display PrintMe = do

@@ -67,11 +67,6 @@ inferType a = case a of
     checkType a tyA
     return tyA
   
-  -- Practicalities
-  -- remember the current position in the type checking monad
-  (Pos p a) ->
-    Env.extendSourceLocation p a $ inferType a
-  
   -- Extensions to the core language
   -- i-unit
   TyUnit -> return TyType
@@ -124,7 +119,7 @@ inferType a = case a of
   (DataCon c args) -> do
     matches <- Env.lookupDConAll c
     case matches of
-      [(tname, (Telescope [], ConstructorDef _ _ (Telescope deltai)))] -> do
+      [(tname, (Telescope [], ConstructorDef _ (Telescope deltai)))] -> do
         let numArgs = length deltai
         unless (length args == numArgs) $
           Env.err
@@ -173,10 +168,6 @@ checkType tm ty = do
         -- check the type of the body of the lambda expression
         Env.extendCtx (Decl (TypeDecl x ep1 tyA)) (checkType body tyB)
       _ -> Env.err [DS "Lambda expression should have a function type, not", DD ty']
-
-    -- Practicalities
-    (Pos p a) -> 
-      Env.extendSourceLocation p a $ checkType a ty'
 
     TrustMe -> return ()
 
@@ -508,7 +499,7 @@ tcEntry (Def n term) = do
           ty <- inferType term
           return $ AddCtx [Decl (TypeDecl n Rel ty), Def n term]
         Just decl ->
-          let handler (Env.Err ps msg) = throwError $ Env.Err ps (msg $$ msg')
+          let handler (Env.Err msg) = throwError $ Env.Err (msg $$ msg')
               msg' =
                 disp
                   [ 
@@ -520,14 +511,12 @@ tcEntry (Def n term) = do
            in do
                 Env.extendCtx (Decl decl) $ checkType term (declType decl) `catchError` handler
                 return $ AddCtx [Decl decl, Def n term]
-    die term' =
-      Env.extendSourceLocation (unPosFlaky term) term $
-        Env.err
-          [ DS "Multiple definitions of",
-            DD n,
-            DS "Previous definition was",
-            DD term'
-          ]
+    die term' = Env.err
+      [ DS "Multiple definitions of",
+        DD n,
+        DS "Previous definition was",
+        DD term'
+      ]
 tcEntry (Decl decl) = do
   duplicateTypeBindingCheck decl
   tcType (declType decl)
@@ -542,15 +531,14 @@ tcEntry (Data t (Telescope delta) cs) =
     edelta <- tcTypeTele delta
     ---- check that the telescope provided
     ---  for each data constructor is wellfomed, and elaborate them
-    let elabConstructorDef defn@(ConstructorDef pos d (Telescope tele)) =
-          Env.extendSourceLocation pos defn $
-            Env.extendCtx (Data t (Telescope delta) []) $
-              Env.extendCtxTele delta $ do
-                etele <- tcTypeTele tele
-                return (ConstructorDef pos d (Telescope tele))
+    let elabConstructorDef defn@(ConstructorDef d (Telescope tele)) =
+          Env.extendCtx (Data t (Telescope delta) []) $
+            Env.extendCtxTele delta $ do
+              etele <- tcTypeTele tele
+              return (ConstructorDef d (Telescope tele))
     ecs <- mapM elabConstructorDef cs
     -- Implicitly, we expect the constructors to actually be different...
-    let cnames = map (\(ConstructorDef _ c _) -> c) cs
+    let cnames = map (\(ConstructorDef c _) -> c) cs
     unless (length cnames == length (nub cnames)) $
       Env.err [DS "Datatype definition", DD t, DS "contains duplicated constructors"]
     -- finally, add the datatype to the env and perform action m
@@ -569,15 +557,12 @@ duplicateTypeBindingCheck decl = do
   case catMaybes [l, l'] of
     [] -> return ()
     -- We already have a type in the environment so fail.
-    decl' : _ ->
-      let p = unPosFlaky $ declType decl
-          msg =
-            [ DS "Duplicate type declaration",
-              DD decl,
-              DS "Previous was",
-              DD decl'
-            ]
-       in Env.extendSourceLocation p decl $ Env.err msg
+    decl' : _ -> Env.err [
+        DS "Duplicate type declaration",
+        DD decl,
+        DS "Previous was",
+        DD decl'
+      ]
 
 -----------------------------------------------------------
 -- Checking that pattern matching is exhaustive
@@ -609,7 +594,7 @@ exhaustivityCheck scrut ty pats = do
             else Env.err $ DS "Missing case for" : map DD l
         loop (PatVar x : _) dcons = return ()
         loop (PatCon dc args : pats') dcons = do
-          (ConstructorDef _ _ (Telescope tele), dcons') <- removeDCon dc dcons
+          (ConstructorDef _ (Telescope tele), dcons') <- removeDCon dc dcons
           tele' <- substTele delta tys tele
           let (aargs, pats'') = relatedPats dc pats'
           -- check the arguments of the data constructor
@@ -620,7 +605,7 @@ exhaustivityCheck scrut ty pats = do
         -- in the current environment
         checkImpossible :: [ConstructorDef] -> TcMonad [DataConName]
         checkImpossible [] = return []
-        checkImpossible (ConstructorDef _ dc (Telescope tele) : rest) = do
+        checkImpossible (ConstructorDef dc (Telescope tele) : rest) = do
           this <-
             ( do
                 tele' <- substTele delta tys tele
@@ -641,7 +626,7 @@ removeDCon ::
   DataConName ->
   [ConstructorDef] ->
   TcMonad (ConstructorDef, [ConstructorDef])
-removeDCon dc (cd@(ConstructorDef _ dc' _) : rest)
+removeDCon dc (cd@(ConstructorDef dc' _) : rest)
   | dc == dc' =
     return (cd, rest)
 removeDCon dc (cd1 : rest) = do

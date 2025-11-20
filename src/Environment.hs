@@ -21,8 +21,6 @@ module Environment
     extendCtxsGlobal,
     extendCtxMods,
     extendHints,
-    extendSourceLocation,
-    getSourceLocation,
     err,
     warn,
     extendErr,
@@ -60,10 +58,6 @@ runTcMonad env m =
   runExceptT $
     runReaderT (Unbound.runFreshMT m) env
 
--- | Marked locations in the source code
-data SourceLocation where
-  SourceLocation :: forall a. Disp a => SourcePos -> a -> SourceLocation
-
 -- | Environment manipulation and accessing functions
 -- The context 'gamma' is a list
 data Env = Env
@@ -75,9 +69,7 @@ data Env = Env
     -- | Type declarations: it's not safe to
     -- put these in the context until a corresponding term
     -- has been checked.
-    hints :: [TypeDecl],
-    -- | what part of the file we are in (for errors/warnings)
-    sourceLocation :: [SourceLocation] 
+    hints :: [TypeDecl]
   }
 
 
@@ -87,7 +79,6 @@ emptyEnv :: Env
 emptyEnv = Env {ctx = preludeDataDecls 
                , globals = length preludeDataDecls 
                , hints = []
-               , sourceLocation = []
               }
 
 instance Disp Env where
@@ -184,7 +175,7 @@ lookupDConAll v = do
   where
     scanGamma [] = return []
     scanGamma ((Data v' delta cs) : g) =
-      case find (\(ConstructorDef _ v'' tele) -> v'' == v) cs of
+      case find (\(ConstructorDef v'' tele) -> v'' == v) cs of
         Nothing -> scanGamma g
         Just c -> do
           more <- scanGamma g
@@ -202,7 +193,7 @@ lookupDCon ::
 lookupDCon c tname = do
   matches <- lookupDConAll c
   case lookup tname matches of
-    Just (delta, ConstructorDef _ _ deltai) ->
+    Just (delta, ConstructorDef _ deltai) ->
       return (delta, deltai)
     Nothing ->
       err
@@ -271,42 +262,29 @@ getLocalCtx = do
   glen <- asks globals
   return $ take (length g - glen) g
 
--- | Push a new source position on the location stack.
-extendSourceLocation :: (MonadReader Env m, Disp t) => SourcePos -> t -> m a -> m a
-extendSourceLocation p t =
-  local (\e@Env {sourceLocation = locs} -> e {sourceLocation = SourceLocation p t : locs})
-
--- | access current source location
-getSourceLocation :: MonadReader Env m => m [SourceLocation]
-getSourceLocation = asks sourceLocation
-
 -- | Add a type hint
 extendHints :: (MonadReader Env m) => TypeDecl -> m a -> m a
 extendHints h = local (\m@Env {hints = hs} -> m {hints = h : hs})
 
 -- | An error that should be reported to the user
-data Err = Err [SourceLocation] Doc
+newtype Err = Err Doc
 
 -- | Augment the error message with addition information
 extendErr :: MonadError Err m => m a -> Doc -> m a
 extendErr ma msg' =
-  ma `catchError` \(Err ps msg) ->
-    throwError $ Err ps (msg $$ msg')
+  ma `catchError` \(Err msg) ->
+    throwError $ Err (msg $$ msg')
 
 instance Semigroup Err where
   (<>) :: Err -> Err -> Err
-  (Err src1 d1) <> (Err src2 d2) = Err (src1 ++ src2) (d1 `mappend` d2)
+  (Err d1) <> (Err d2) = Err (d1 `mappend` d2)
 
 instance Monoid Err where
   mempty :: Err
-  mempty = Err [] mempty
+  mempty = Err mempty
 
 dispErr :: (forall a. Disp a => a -> Doc) -> Err -> Doc
-dispErr disp (Err [] msg) = msg
-dispErr disp (Err ((SourceLocation p term) : _) msg) =
-    disp p
-      $$ nest 2 msg
-      $$ nest 2 (text "In the expression" $$ nest 2 (disp term))
+dispErr disp (Err msg) = msg
 
 instance Disp Err where
   disp :: Err -> Doc
@@ -315,15 +293,11 @@ instance Disp Err where
 
 -- | Throw an error
 err :: (Disp a, MonadError Err m, MonadReader Env m) => [a] -> m b
-err d = do
-  loc <- getSourceLocation
-  throwError $ Err loc (sep $ map disp d)
+err d = throwError $ Err (sep $ map disp d)
 
 -- | Print a warning
 warn :: (Disp a, MonadReader Env m, MonadIO m) => a -> m ()
-warn e = do
-  loc <- getSourceLocation
-  liftIO $ putStrLn $ "warning: " ++ render (disp (Err loc (disp e)))
+warn e = liftIO $ putStrLn $ "warning: " ++ render (disp (Err (disp e)))
 
 checkStage ::
   (MonadReader Env m, MonadError Err m) =>
