@@ -188,7 +188,9 @@ genTypeAlias _ = Nothing
 
 genTaggedUnion :: Binding -> Maybe String
 genTaggedUnion (TaggedUnion name arity unionFields kindConstants) = let
-  kindDecls = [[i|#{constant} = #{index}|] | (index, constant) <- zip [0::Int ..] kindConstants]
+  kindIndices = [0..length kindConstants - 1]
+  kindHint = [i|kind: Literal[#{intercalate ", " $ map show kindIndices}]|]
+  kindDecls = [[i|#{constant} = #{index}|] | (index, constant) <- zip kindIndices kindConstants]
   fieldDecl = [
     "_fields_ = [",
     "    (\"kind\", c_int32),",
@@ -201,10 +203,10 @@ genTaggedUnion (TaggedUnion name arity unionFields kindConstants) = let
   initMethods = map (genInitMethod . second genTypeBinding) unionFields
   in Just $ intercalate ('\n':indentation) $ case arity of
   0 -> classDecl : intercalate [""] decls where
-    decls = [kindDecls, fieldDecl] ++ initMethods
+    decls = [[kindHint], kindDecls, fieldDecl] ++ initMethods
     classDecl = [i|class #{name}(Structure):|]
   _ -> classDecl : intercalate [""] decls where
-    decls = [kindDecls, fieldDecl, classGetItemImpl] ++ initMethods
+    decls = [[kindHint], kindDecls, fieldDecl, classGetItemImpl] ++ initMethods
     classDecl = [i|class #{name}[#{intercalate ", " typeArgs}](Structure):|]
     classGetItemImpl = ["@classmethod", "@cache",
       [i|def __class_getitem__(cls, type_args: tuple[#{tupleTypeArgs}]) -> type:|],
@@ -224,6 +226,7 @@ generateBindings bindings = intercalate "\n\n" (imports : classes ++ aliases ++ 
     ["from __future__ import annotations",
      "from ctypes import c_int32, c_void_p, Structure",
      "from functools import cache",
+     "from typing import Literal",
      "from .base import \\",
      "    Bool, call_export, init_tagged_union, Int, List, set_export_signature, String, Tuple"]
 

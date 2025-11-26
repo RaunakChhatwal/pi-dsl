@@ -1,10 +1,13 @@
 from __future__ import annotations
 from ctypes import c_int32, c_void_p, Structure
 from functools import cache
+from typing import Literal
 from .base import \
     Bool, call_export, init_tagged_union, Int, List, set_export_signature, String, Tuple
 
 class Either[T1, T2](Structure):
+    kind: Literal[0, 1]
+    
     KIND_LEFT = 0
     KIND_RIGHT = 1
     
@@ -27,6 +30,8 @@ class Either[T1, T2](Structure):
         return init_tagged_union(cls, cls.KIND_RIGHT, value)
 
 class Name[T1](Structure):
+    kind: Literal[0, 1]
+    
     KIND_FN = 0
     KIND_BN = 1
     
@@ -49,6 +54,8 @@ class Name[T1](Structure):
         return init_tagged_union(cls, cls.KIND_BN, value)
 
 class Epsilon(Structure):
+    kind: Literal[0, 1]
+    
     KIND_REL = 0
     KIND_IRR = 1
     
@@ -58,6 +65,8 @@ class Epsilon(Structure):
     ]
 
 class Bind[T1, T2](Structure):
+    kind: Literal[0]
+    
     KIND_B = 0
     
     _fields_ = [
@@ -75,6 +84,8 @@ class Bind[T1, T2](Structure):
         return init_tagged_union(cls, cls.KIND_B, value)
 
 class Arg(Structure):
+    kind: Literal[0]
+    
     KIND_ARG = 0
     
     _fields_ = [
@@ -87,6 +98,8 @@ class Arg(Structure):
         return init_tagged_union(cls, cls.KIND_ARG, value)
 
 class Pattern(Structure):
+    kind: Literal[0, 1]
+    
     KIND_PAT_CON = 0
     KIND_PAT_VAR = 1
     
@@ -104,6 +117,8 @@ class Pattern(Structure):
         return init_tagged_union(cls, cls.KIND_PAT_VAR, value)
 
 class Term(Structure):
+    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    
     KIND_TY_TYPE = 0
     KIND_VAR = 1
     KIND_LAM = 2
@@ -203,6 +218,8 @@ class Term(Structure):
         return init_tagged_union(cls, cls.KIND_CASE, value)
 
 class TypeDecl(Structure):
+    kind: Literal[0]
+    
     KIND_TYPE_DECL = 0
     
     _fields_ = [
@@ -215,6 +232,8 @@ class TypeDecl(Structure):
         return init_tagged_union(cls, cls.KIND_TYPE_DECL, value)
 
 class ConstructorDef(Structure):
+    kind: Literal[0]
+    
     KIND_CONSTRUCTOR_DEF = 0
     
     _fields_ = [
@@ -227,6 +246,8 @@ class ConstructorDef(Structure):
         return init_tagged_union(cls, cls.KIND_CONSTRUCTOR_DEF, value)
 
 class Entry(Structure):
+    kind: Literal[0, 1, 2, 3]
+    
     KIND_DECL = 0
     KIND_DEF = 1
     KIND_DEMOTE = 2
@@ -254,6 +275,8 @@ class Entry(Structure):
         return init_tagged_union(cls, cls.KIND_DATA, value)
 
 class Env(Structure):
+    kind: Literal[0]
+    
     KIND_ENV = 0
     
     _fields_ = [
