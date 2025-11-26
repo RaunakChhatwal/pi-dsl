@@ -1,6 +1,13 @@
 import ctypes
-from ctypes import c_size_t, c_void_p, Structure
+from ctypes import c_size_t, c_void_p, POINTER, Structure
 from functools import cache
+import subprocess as sp
+from typing import Any
+
+# Load the shared library
+command = "fd pi-forall-lib.so dist-newstyle"
+path = sp.run(command.split(), capture_output=True, check=True, text=True).stdout.strip()
+lib = ctypes.CDLL(path)
 
 class List[T](Structure):
     _fields_ = [
@@ -48,8 +55,17 @@ class String(List[Char]):
 Bool = ctypes.c_bool
 Int = ctypes.c_int64
 
-def init_tagged_union[T](cls: type[T], kind: int, value: object) -> T:
+def init_tagged_union[T: Structure](cls: type[T], kind: int, value: Any) -> T:
     instance = cls()
-    setattr(instance, "kind", ctypes.c_int32(kind))
-    setattr(instance, "union", ctypes.cast(ctypes.pointer(value), c_void_p))
+    instance.kind = ctypes.c_int32(kind)
+    instance.union = ctypes.cast(ctypes.pointer(value), c_void_p)
     return instance
+
+def set_export_signature(name: str, param_types: list[type], return_type: type):
+    export = getattr(lib, name)
+    export.argtypes = [POINTER(param_type) for param_type in param_types]
+    export.restype = POINTER(return_type)
+
+def call_export(name: str, args: list[Any]) -> Any:
+    export = getattr(lib, name)
+    return export(*[ctypes.byref(arg) for arg in args]).contents

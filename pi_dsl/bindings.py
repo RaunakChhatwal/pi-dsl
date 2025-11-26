@@ -1,7 +1,30 @@
 from __future__ import annotations
 from ctypes import c_int32, c_void_p, Structure
 from functools import cache
-from .base import Bool, init_tagged_union, Int, List, String, Tuple
+from .base import \
+    Bool, call_export, init_tagged_union, Int, List, set_export_signature, String, Tuple
+
+class Either[T1, T2](Structure):
+    KIND_LEFT = 0
+    KIND_RIGHT = 1
+    
+    _fields_ = [
+        ("kind", c_int32),
+        ("union", c_void_p)
+    ]
+    
+    @classmethod
+    @cache
+    def __class_getitem__(cls, type_args: tuple[type[T1], type[T2]]) -> type:
+        return type("Either", (cls,), { "type_args": type_args })
+    
+    @classmethod
+    def init_left(cls, value: T1):
+        return init_tagged_union(cls, cls.KIND_LEFT, value)
+    
+    @classmethod
+    def init_right(cls, value: T2):
+        return init_tagged_union(cls, cls.KIND_RIGHT, value)
 
 class Name[T1](Structure):
     KIND_FN = 0
@@ -179,7 +202,68 @@ class Term(Structure):
     def init_case(cls, value: Tuple[Term, List[Match]]):
         return init_tagged_union(cls, cls.KIND_CASE, value)
 
-TName = Name[Term]
+class TypeDecl(Structure):
+    KIND_TYPE_DECL = 0
+    
+    _fields_ = [
+        ("kind", c_int32),
+        ("union", c_void_p)
+    ]
+    
+    @classmethod
+    def init_type_decl(cls, value: Tuple[TName, Epsilon, Type]):
+        return init_tagged_union(cls, cls.KIND_TYPE_DECL, value)
+
+class ConstructorDef(Structure):
+    KIND_CONSTRUCTOR_DEF = 0
+    
+    _fields_ = [
+        ("kind", c_int32),
+        ("union", c_void_p)
+    ]
+    
+    @classmethod
+    def init_constructor_def(cls, value: Tuple[DataConName, Telescope]):
+        return init_tagged_union(cls, cls.KIND_CONSTRUCTOR_DEF, value)
+
+class Entry(Structure):
+    KIND_DECL = 0
+    KIND_DEF = 1
+    KIND_DEMOTE = 2
+    KIND_DATA = 3
+    
+    _fields_ = [
+        ("kind", c_int32),
+        ("union", c_void_p)
+    ]
+    
+    @classmethod
+    def init_decl(cls, value: TypeDecl):
+        return init_tagged_union(cls, cls.KIND_DECL, value)
+    
+    @classmethod
+    def init_def(cls, value: Tuple[TName, Term]):
+        return init_tagged_union(cls, cls.KIND_DEF, value)
+    
+    @classmethod
+    def init_demote(cls, value: Epsilon):
+        return init_tagged_union(cls, cls.KIND_DEMOTE, value)
+    
+    @classmethod
+    def init_data(cls, value: Tuple[TyConName, Telescope, List[ConstructorDef]]):
+        return init_tagged_union(cls, cls.KIND_DATA, value)
+
+class Env(Structure):
+    KIND_ENV = 0
+    
+    _fields_ = [
+        ("kind", c_int32),
+        ("union", c_void_p)
+    ]
+    
+    @classmethod
+    def init_env(cls, value: Tuple[List[Entry], Int, List[TypeDecl]]):
+        return init_tagged_union(cls, cls.KIND_ENV, value)
 
 Type = Term
 
@@ -188,3 +272,11 @@ TyConName = String
 DataConName = String
 
 Match = Bind[Pattern, Term]
+
+TName = Name[Term]
+
+Telescope = List[Entry]
+
+set_export_signature("infer_type", [Env, Term], Either[String, Type])
+def infer_type(env: Env, term: Term) -> Either[String, Type]:
+    return call_export("infer_type", [env, term])

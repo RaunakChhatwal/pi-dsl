@@ -1,48 +1,19 @@
 {- pi-forall language -}
 
 -- | Utilities for managing a typechecking context.
-module Environment
-  ( TcMonad,
-    runTcMonad,
-    Env,
-    emptyEnv,
-    lookupTy,
-    lookupTyMaybe,
-    lookupDef,
-    lookupHint ,
-    lookupTCon,
-    lookupDCon,
-    lookupDConAll,
-    extendCtxTele  ,
-    getCtx,
-    getLocalCtx,
-    extendCtx,
-    extendCtxs,
-    extendCtxsGlobal,
-    extendCtxMods,
-    extendHints,
-    err,
-    warn,
-    extendErr,
-    D (..),
-    Err (..),
-    withStage,
-    checkStage 
-  )
-where
+module Environment where
 
-import Control.Monad.Except
-    ( MonadError(..), ExceptT, runExceptT )
-import Control.Monad.Reader
-    ( MonadReader(local), asks, ReaderT(runReaderT) )
-import Control.Monad ( unless )
-import Control.Monad.IO.Class ( MonadIO(..) )
+import Control.Monad.Except (MonadError(..), ExceptT, runExceptT)
+import Control.Monad.Reader (MonadReader(local), asks, ReaderT(runReaderT))
+import Control.Monad (unless)
+import Control.Monad.IO.Class (MonadIO(..))
 import Data.List 
-import Data.Maybe ( listToMaybe )
-import PrettyPrint ( SourcePos, render, D(..), Disp(..), Doc )
+import Data.Maybe (listToMaybe)
+import PrettyPrint (SourcePos, render, D(..), Disp(..), Doc, ppr)
 import Syntax
-import Text.PrettyPrint.HughesPJ ( ($$), nest, sep, text, vcat )
+import Text.PrettyPrint.HughesPJ (($$), nest, sep, text, vcat)
 import qualified Unbound.Generics.LocallyNameless as Unbound
+import Data.Bifunctor (first)
 
 -- | The type checking Monad includes a reader (for the
 -- environment), freshness state (for supporting locally-nameless
@@ -53,10 +24,8 @@ type TcMonad = Unbound.FreshMT (ReaderT Env (ExceptT Err IO))
 -- | Entry point for the type checking monad, given an
 -- initial environment, returns either an error message
 -- or some result.
-runTcMonad :: Env -> TcMonad a -> IO (Either Err a)
-runTcMonad env m =
-  runExceptT $
-    runReaderT (Unbound.runFreshMT m) env
+runTcMonad :: Env -> TcMonad a -> IO (Either String a)
+runTcMonad env m = first ppr <$> runExceptT (runReaderT (Unbound.runFreshMT m) env)
 
 -- | Environment manipulation and accessing functions
 -- The context 'gamma' is a list
@@ -72,14 +41,6 @@ data Env = Env
     hints :: [TypeDecl]
   }
 
-
-
--- | The initial environment.
-emptyEnv :: Env
-emptyEnv = Env {ctx = preludeDataDecls 
-               , globals = length preludeDataDecls 
-               , hints = []
-              }
 
 instance Disp Env where
   disp :: Env -> Doc

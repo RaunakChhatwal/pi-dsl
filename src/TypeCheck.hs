@@ -11,10 +11,10 @@ import Data.List (nub)
 
 import Data.Maybe ( catMaybes )
 
-import Environment (D (..), TcMonad)
+import Environment (TcMonad)
 import Environment qualified as Env
 import Equal qualified
-import PrettyPrint (Disp (disp), debug)
+import PrettyPrint (D(DS, DD), Disp (disp), debug)
 import Syntax
 import Debug.Trace
 

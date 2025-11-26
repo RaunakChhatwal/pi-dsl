@@ -1,12 +1,6 @@
 import ctypes
 from ctypes import c_bool, POINTER
-import subprocess as sp
-from pi_dsl import String, Term, Tuple
-
-# Load the shared library
-command = "fd pi-forall-lib.so dist-newstyle"
-path = sp.run(command.split(), capture_output=True, check=True, text=True).stdout.strip()
-lib = ctypes.CDLL(path)
+from pi_dsl import *
 
 # Initialize Haskell runtime
 print("Initializing Haskell runtime...")
@@ -40,6 +34,29 @@ if_tuple = Tuple[Term, Term, Term](condition, then_branch, else_branch)
 if_term = Term.init_if(if_tuple)
 result_ptr = lib.ppr_term(ctypes.byref(if_term))
 print(f"ppr_term(if True then False else True) = {result_ptr.contents}")
+
+# Create an empty environment
+empty_entries = List[Entry]([])
+counter = Int(0)
+empty_type_decls = List[TypeDecl]([])
+env_tuple = Tuple[List[Entry], Int, List[TypeDecl]](empty_entries, counter, empty_type_decls)
+env = Env.init_env(env_tuple)
+
+# Test type inference on a boolean literal
+print("Testing infer_type on boolean literal (True)...")
+result = infer_type(env, Term.init_lit_bool(Bool(True)))
+print(f"infer_type(True) = Either object with kind={result.kind}")
+if result.kind == Either.KIND_RIGHT:
+    print("Type inference succeeded!")
+    # Extract the Type from the union and pretty print it
+    type_ptr = ctypes.cast(result.union, POINTER(Term))
+    type_result = lib.ppr_term(type_ptr)
+    print(f"Inferred type: {type_result.contents}")
+else:
+    print("Type inference failed!")
+    # Extract the error string from the union
+    error_ptr = ctypes.cast(result.union, POINTER(String))
+    print(f"Error: {error_ptr.contents}")
 
 # Shutdown Haskell runtime
 print("Shutting down Haskell runtime...")

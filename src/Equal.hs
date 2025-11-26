@@ -5,7 +5,8 @@ module Equal (whnf, equate, unify
               {- SOLN DATA -},ensureTCon{- STUBWITH -} ) where
 
 import Syntax
-import Environment ( D(DS, DD), TcMonad )
+import Environment (TcMonad)
+import PrettyPrint (D(DS, DD))
 import qualified Environment as Env
 import qualified Unbound.Generics.LocallyNameless as Unbound
 
