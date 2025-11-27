@@ -1,11 +1,9 @@
 from __future__ import annotations
-from ctypes import c_int32, c_void_p, Structure
-from functools import cache
+from ctypes import c_int32, c_void_p
 from typing import Literal
-from .base import \
-    Bool, call_export, init_tagged_union, Int, List, set_export_signature, String, Tuple
+from .base import Bool, call_export, Int, List, set_export_signature, String, TaggedUnion, Tuple
 
-class Either[T1, T2](Structure):
+class Either[T1, T2](TaggedUnion):
     kind: Literal[0, 1]
     
     KIND_LEFT = 0
@@ -17,19 +15,22 @@ class Either[T1, T2](Structure):
     ]
     
     @classmethod
-    @cache
-    def __class_getitem__(cls, type_args: tuple[type[T1], type[T2]]) -> type:
-        return type("Either", (cls,), { "type_args": type_args })
-    
-    @classmethod
     def init_left(cls, value: T1):
-        return init_tagged_union(cls, cls.KIND_LEFT, value)
+        return cls(cls.KIND_LEFT, value)
+    
+    def get_left(self) -> T1:
+        assert self.kind == self.KIND_LEFT
+        return self.get_field(T1)
     
     @classmethod
     def init_right(cls, value: T2):
-        return init_tagged_union(cls, cls.KIND_RIGHT, value)
+        return cls(cls.KIND_RIGHT, value)
+    
+    def get_right(self) -> T2:
+        assert self.kind == self.KIND_RIGHT
+        return self.get_field(T2)
 
-class Name[T1](Structure):
+class Name[T1](TaggedUnion):
     kind: Literal[0, 1]
     
     KIND_FN = 0
@@ -41,19 +42,22 @@ class Name[T1](Structure):
     ]
     
     @classmethod
-    @cache
-    def __class_getitem__(cls, type_args: tuple[type[T1]]) -> type:
-        return type("Name", (cls,), { "type_args": type_args })
-    
-    @classmethod
     def init_fn(cls, value: Tuple[String, Int]):
-        return init_tagged_union(cls, cls.KIND_FN, value)
+        return cls(cls.KIND_FN, value)
+    
+    def get_fn(self) -> Tuple[String, Int]:
+        assert self.kind == self.KIND_FN
+        return self.get_field(Tuple[String, Int])
     
     @classmethod
     def init_bn(cls, value: Tuple[Int, Int]):
-        return init_tagged_union(cls, cls.KIND_BN, value)
+        return cls(cls.KIND_BN, value)
+    
+    def get_bn(self) -> Tuple[Int, Int]:
+        assert self.kind == self.KIND_BN
+        return self.get_field(Tuple[Int, Int])
 
-class Epsilon(Structure):
+class Epsilon(TaggedUnion):
     kind: Literal[0, 1]
     
     KIND_REL = 0
@@ -64,7 +68,7 @@ class Epsilon(Structure):
         ("union", c_void_p)
     ]
 
-class Bind[T1, T2](Structure):
+class Bind[T1, T2](TaggedUnion):
     kind: Literal[0]
     
     KIND_B = 0
@@ -75,15 +79,14 @@ class Bind[T1, T2](Structure):
     ]
     
     @classmethod
-    @cache
-    def __class_getitem__(cls, type_args: tuple[type[T1], type[T2]]) -> type:
-        return type("Bind", (cls,), { "type_args": type_args })
-    
-    @classmethod
     def init_b(cls, value: Tuple[T1, T2]):
-        return init_tagged_union(cls, cls.KIND_B, value)
+        return cls(cls.KIND_B, value)
+    
+    def get_b(self) -> Tuple[T1, T2]:
+        assert self.kind == self.KIND_B
+        return self.get_field(Tuple[T1, T2])
 
-class Arg(Structure):
+class Arg(TaggedUnion):
     kind: Literal[0]
     
     KIND_ARG = 0
@@ -95,9 +98,13 @@ class Arg(Structure):
     
     @classmethod
     def init_arg(cls, value: Tuple[Epsilon, Term]):
-        return init_tagged_union(cls, cls.KIND_ARG, value)
+        return cls(cls.KIND_ARG, value)
+    
+    def get_arg(self) -> Tuple[Epsilon, Term]:
+        assert self.kind == self.KIND_ARG
+        return self.get_field(Tuple[Epsilon, Term])
 
-class Pattern(Structure):
+class Pattern(TaggedUnion):
     kind: Literal[0, 1]
     
     KIND_PAT_CON = 0
@@ -110,13 +117,21 @@ class Pattern(Structure):
     
     @classmethod
     def init_pat_con(cls, value: Tuple[DataConName, List[Tuple[Pattern, Epsilon]]]):
-        return init_tagged_union(cls, cls.KIND_PAT_CON, value)
+        return cls(cls.KIND_PAT_CON, value)
+    
+    def get_pat_con(self) -> Tuple[DataConName, List[Tuple[Pattern, Epsilon]]]:
+        assert self.kind == self.KIND_PAT_CON
+        return self.get_field(Tuple[DataConName, List[Tuple[Pattern, Epsilon]]])
     
     @classmethod
     def init_pat_var(cls, value: TName):
-        return init_tagged_union(cls, cls.KIND_PAT_VAR, value)
+        return cls(cls.KIND_PAT_VAR, value)
+    
+    def get_pat_var(self) -> TName:
+        assert self.kind == self.KIND_PAT_VAR
+        return self.get_field(TName)
 
-class Term(Structure):
+class Term(TaggedUnion):
     kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
     
     KIND_TY_TYPE = 0
@@ -151,73 +166,141 @@ class Term(Structure):
     
     @classmethod
     def init_var(cls, value: TName):
-        return init_tagged_union(cls, cls.KIND_VAR, value)
+        return cls(cls.KIND_VAR, value)
+    
+    def get_var(self) -> TName:
+        assert self.kind == self.KIND_VAR
+        return self.get_field(TName)
     
     @classmethod
     def init_lam(cls, value: Tuple[Epsilon, Bind[TName, Term]]):
-        return init_tagged_union(cls, cls.KIND_LAM, value)
+        return cls(cls.KIND_LAM, value)
+    
+    def get_lam(self) -> Tuple[Epsilon, Bind[TName, Term]]:
+        assert self.kind == self.KIND_LAM
+        return self.get_field(Tuple[Epsilon, Bind[TName, Term]])
     
     @classmethod
     def init_app(cls, value: Tuple[Term, Arg]):
-        return init_tagged_union(cls, cls.KIND_APP, value)
+        return cls(cls.KIND_APP, value)
+    
+    def get_app(self) -> Tuple[Term, Arg]:
+        assert self.kind == self.KIND_APP
+        return self.get_field(Tuple[Term, Arg])
     
     @classmethod
     def init_ty_pi(cls, value: Tuple[Epsilon, Type, Bind[TName, Type]]):
-        return init_tagged_union(cls, cls.KIND_TY_PI, value)
+        return cls(cls.KIND_TY_PI, value)
+    
+    def get_ty_pi(self) -> Tuple[Epsilon, Type, Bind[TName, Type]]:
+        assert self.kind == self.KIND_TY_PI
+        return self.get_field(Tuple[Epsilon, Type, Bind[TName, Type]])
     
     @classmethod
     def init_ann(cls, value: Tuple[Term, Type]):
-        return init_tagged_union(cls, cls.KIND_ANN, value)
+        return cls(cls.KIND_ANN, value)
+    
+    def get_ann(self) -> Tuple[Term, Type]:
+        assert self.kind == self.KIND_ANN
+        return self.get_field(Tuple[Term, Type])
     
     @classmethod
     def init_let(cls, value: Tuple[Term, Bind[TName, Term]]):
-        return init_tagged_union(cls, cls.KIND_LET, value)
+        return cls(cls.KIND_LET, value)
+    
+    def get_let(self) -> Tuple[Term, Bind[TName, Term]]:
+        assert self.kind == self.KIND_LET
+        return self.get_field(Tuple[Term, Bind[TName, Term]])
     
     @classmethod
     def init_lit_bool(cls, value: Bool):
-        return init_tagged_union(cls, cls.KIND_LIT_BOOL, value)
+        return cls(cls.KIND_LIT_BOOL, value)
+    
+    def get_lit_bool(self) -> Bool:
+        assert self.kind == self.KIND_LIT_BOOL
+        return self.get_field(Bool)
     
     @classmethod
     def init_if(cls, value: Tuple[Term, Term, Term]):
-        return init_tagged_union(cls, cls.KIND_IF, value)
+        return cls(cls.KIND_IF, value)
+    
+    def get_if(self) -> Tuple[Term, Term, Term]:
+        assert self.kind == self.KIND_IF
+        return self.get_field(Tuple[Term, Term, Term])
     
     @classmethod
     def init_ty_sigma(cls, value: Tuple[Term, Bind[TName, Term]]):
-        return init_tagged_union(cls, cls.KIND_TY_SIGMA, value)
+        return cls(cls.KIND_TY_SIGMA, value)
+    
+    def get_ty_sigma(self) -> Tuple[Term, Bind[TName, Term]]:
+        assert self.kind == self.KIND_TY_SIGMA
+        return self.get_field(Tuple[Term, Bind[TName, Term]])
     
     @classmethod
     def init_prod(cls, value: Tuple[Term, Term]):
-        return init_tagged_union(cls, cls.KIND_PROD, value)
+        return cls(cls.KIND_PROD, value)
+    
+    def get_prod(self) -> Tuple[Term, Term]:
+        assert self.kind == self.KIND_PROD
+        return self.get_field(Tuple[Term, Term])
     
     @classmethod
     def init_let_pair(cls, value: Tuple[Term, Bind[Tuple[TName, TName], Term]]):
-        return init_tagged_union(cls, cls.KIND_LET_PAIR, value)
+        return cls(cls.KIND_LET_PAIR, value)
+    
+    def get_let_pair(self) -> Tuple[Term, Bind[Tuple[TName, TName], Term]]:
+        assert self.kind == self.KIND_LET_PAIR
+        return self.get_field(Tuple[Term, Bind[Tuple[TName, TName], Term]])
     
     @classmethod
     def init_ty_eq(cls, value: Tuple[Term, Term]):
-        return init_tagged_union(cls, cls.KIND_TY_EQ, value)
+        return cls(cls.KIND_TY_EQ, value)
+    
+    def get_ty_eq(self) -> Tuple[Term, Term]:
+        assert self.kind == self.KIND_TY_EQ
+        return self.get_field(Tuple[Term, Term])
     
     @classmethod
     def init_subst(cls, value: Tuple[Term, Term]):
-        return init_tagged_union(cls, cls.KIND_SUBST, value)
+        return cls(cls.KIND_SUBST, value)
+    
+    def get_subst(self) -> Tuple[Term, Term]:
+        assert self.kind == self.KIND_SUBST
+        return self.get_field(Tuple[Term, Term])
     
     @classmethod
     def init_contra(cls, value: Term):
-        return init_tagged_union(cls, cls.KIND_CONTRA, value)
+        return cls(cls.KIND_CONTRA, value)
+    
+    def get_contra(self) -> Term:
+        assert self.kind == self.KIND_CONTRA
+        return self.get_field(Term)
     
     @classmethod
     def init_ty_con(cls, value: Tuple[TyConName, List[Arg]]):
-        return init_tagged_union(cls, cls.KIND_TY_CON, value)
+        return cls(cls.KIND_TY_CON, value)
+    
+    def get_ty_con(self) -> Tuple[TyConName, List[Arg]]:
+        assert self.kind == self.KIND_TY_CON
+        return self.get_field(Tuple[TyConName, List[Arg]])
     
     @classmethod
     def init_data_con(cls, value: Tuple[DataConName, List[Arg]]):
-        return init_tagged_union(cls, cls.KIND_DATA_CON, value)
+        return cls(cls.KIND_DATA_CON, value)
+    
+    def get_data_con(self) -> Tuple[DataConName, List[Arg]]:
+        assert self.kind == self.KIND_DATA_CON
+        return self.get_field(Tuple[DataConName, List[Arg]])
     
     @classmethod
     def init_case(cls, value: Tuple[Term, List[Match]]):
-        return init_tagged_union(cls, cls.KIND_CASE, value)
+        return cls(cls.KIND_CASE, value)
+    
+    def get_case(self) -> Tuple[Term, List[Match]]:
+        assert self.kind == self.KIND_CASE
+        return self.get_field(Tuple[Term, List[Match]])
 
-class TypeDecl(Structure):
+class TypeDecl(TaggedUnion):
     kind: Literal[0]
     
     KIND_TYPE_DECL = 0
@@ -229,9 +312,13 @@ class TypeDecl(Structure):
     
     @classmethod
     def init_type_decl(cls, value: Tuple[TName, Epsilon, Type]):
-        return init_tagged_union(cls, cls.KIND_TYPE_DECL, value)
+        return cls(cls.KIND_TYPE_DECL, value)
+    
+    def get_type_decl(self) -> Tuple[TName, Epsilon, Type]:
+        assert self.kind == self.KIND_TYPE_DECL
+        return self.get_field(Tuple[TName, Epsilon, Type])
 
-class ConstructorDef(Structure):
+class ConstructorDef(TaggedUnion):
     kind: Literal[0]
     
     KIND_CONSTRUCTOR_DEF = 0
@@ -243,9 +330,13 @@ class ConstructorDef(Structure):
     
     @classmethod
     def init_constructor_def(cls, value: Tuple[DataConName, Telescope]):
-        return init_tagged_union(cls, cls.KIND_CONSTRUCTOR_DEF, value)
+        return cls(cls.KIND_CONSTRUCTOR_DEF, value)
+    
+    def get_constructor_def(self) -> Tuple[DataConName, Telescope]:
+        assert self.kind == self.KIND_CONSTRUCTOR_DEF
+        return self.get_field(Tuple[DataConName, Telescope])
 
-class Entry(Structure):
+class Entry(TaggedUnion):
     kind: Literal[0, 1, 2, 3]
     
     KIND_DECL = 0
@@ -260,21 +351,37 @@ class Entry(Structure):
     
     @classmethod
     def init_decl(cls, value: TypeDecl):
-        return init_tagged_union(cls, cls.KIND_DECL, value)
+        return cls(cls.KIND_DECL, value)
+    
+    def get_decl(self) -> TypeDecl:
+        assert self.kind == self.KIND_DECL
+        return self.get_field(TypeDecl)
     
     @classmethod
     def init_def(cls, value: Tuple[TName, Term]):
-        return init_tagged_union(cls, cls.KIND_DEF, value)
+        return cls(cls.KIND_DEF, value)
+    
+    def get_def(self) -> Tuple[TName, Term]:
+        assert self.kind == self.KIND_DEF
+        return self.get_field(Tuple[TName, Term])
     
     @classmethod
     def init_demote(cls, value: Epsilon):
-        return init_tagged_union(cls, cls.KIND_DEMOTE, value)
+        return cls(cls.KIND_DEMOTE, value)
+    
+    def get_demote(self) -> Epsilon:
+        assert self.kind == self.KIND_DEMOTE
+        return self.get_field(Epsilon)
     
     @classmethod
     def init_data(cls, value: Tuple[TyConName, Telescope, List[ConstructorDef]]):
-        return init_tagged_union(cls, cls.KIND_DATA, value)
+        return cls(cls.KIND_DATA, value)
+    
+    def get_data(self) -> Tuple[TyConName, Telescope, List[ConstructorDef]]:
+        assert self.kind == self.KIND_DATA
+        return self.get_field(Tuple[TyConName, Telescope, List[ConstructorDef]])
 
-class Env(Structure):
+class Env(TaggedUnion):
     kind: Literal[0]
     
     KIND_ENV = 0
@@ -286,7 +393,11 @@ class Env(Structure):
     
     @classmethod
     def init_env(cls, value: Tuple[List[Entry], Int, List[TypeDecl]]):
-        return init_tagged_union(cls, cls.KIND_ENV, value)
+        return cls(cls.KIND_ENV, value)
+    
+    def get_env(self) -> Tuple[List[Entry], Int, List[TypeDecl]]:
+        assert self.kind == self.KIND_ENV
+        return self.get_field(Tuple[List[Entry], Int, List[TypeDecl]])
 
 Type = Term
 

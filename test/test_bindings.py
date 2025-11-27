@@ -46,18 +46,25 @@ env = Env.init_env(env_tuple)
 print("Testing infer_type on boolean literal (True)...")
 result = infer_type(env, Term.init_lit_bool(Bool(True)))
 print(f"infer_type(True) = Either object with kind={result.kind}")
+
+# Test the new getter methods
 match result.kind:
     case Either.KIND_LEFT:
         print("Type inference failed!")
-        # Extract the error string from the union
-        error_ptr = ctypes.cast(result.union, POINTER(String))
-        print(f"Error: {error_ptr.contents}")
+        error_string = result.get_left()
+        print(f"Error: {error_string}")
     case Either.KIND_RIGHT:
         print("Type inference succeeded!")
-        # Extract the Type from the union and pretty print it
-        type_ptr = ctypes.cast(result.union, POINTER(Term))
-        type_result = lib.ppr_term(type_ptr)
+        inferred_type = result.get_right()
+        type_result = lib.ppr_term(ctypes.byref(inferred_type))
         print(f"Inferred type: {type_result.contents}")
+
+# Test another getter method on Term
+print("Testing getter method on Term...")
+bool_term = Term.init_lit_bool(Bool(True))
+print(f"Term kind: {bool_term.kind}")
+bool_value = bool_term.get_lit_bool()
+print(f"Boolean value: {bool_value}")
 
 # Shutdown Haskell runtime
 print("Shutting down Haskell runtime...")

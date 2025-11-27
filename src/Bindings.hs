@@ -23,6 +23,7 @@ import Control.Arrow ((&&&))
 import Data.Bool (bool)
 import Data.Either (partitionEithers)
 import Environment (Env)
+import Data.Bifoldable (biList)
 
 destructureCtor :: TH.Con -> (TH.Name, [TH.Type])
 destructureCtor (TH.NormalC name params) = (name, map snd params)
@@ -191,27 +192,32 @@ genTaggedUnion (TaggedUnion name arity unionFields kindConstants) = let
   kindIndices = [0..length kindConstants - 1]
   kindHint = [i|kind: Literal[#{intercalate ", " $ map show kindIndices}]|]
   kindDecls = [[i|#{constant} = #{index}|] | (index, constant) <- zip kindIndices kindConstants]
+
   fieldDecl = [
     "_fields_ = [",
     "    (\"kind\", c_int32),",
     "    (\"union\", c_void_p)",
     "]" ]
+
   genInitMethod (fieldName, fieldType) =
     [[i|@classmethod|],
      [i|def init_#{fieldName}(cls, value: #{fieldType}):|],
-     [i|    return init_tagged_union(cls, cls.KIND_#{map toUpper fieldName}, value)|]]
-  initMethods = map (genInitMethod . second genTypeBinding) unionFields
+     [i|    return cls(cls.KIND_#{map toUpper fieldName}, value)|]]
+  genGetMethod (fieldName, fieldType) =
+    [[i|def get_#{fieldName}(self) -> #{fieldType}:|],
+     [i|    assert self.kind == self.KIND_#{map toUpper fieldName}|],
+     [i|    return self.get_field(#{fieldType})|]]
+  accessors =
+    concatMap (biList . (genInitMethod &&& genGetMethod) . second genTypeBinding) unionFields
+
   in Just $ intercalate ('\n':indentation) $ case arity of
   0 -> classDecl : intercalate [""] decls where
-    decls = [[kindHint], kindDecls, fieldDecl] ++ initMethods
-    classDecl = [i|class #{name}(Structure):|]
+    decls = [[kindHint], kindDecls, fieldDecl] ++ accessors
+    classDecl = [i|class #{name}(TaggedUnion):|]
+
   _ -> classDecl : intercalate [""] decls where
-    decls = [[kindHint], kindDecls, fieldDecl, classGetItemImpl] ++ initMethods
-    classDecl = [i|class #{name}[#{intercalate ", " typeArgs}](Structure):|]
-    classGetItemImpl = ["@classmethod", "@cache",
-      [i|def __class_getitem__(cls, type_args: tuple[#{tupleTypeArgs}]) -> type:|],
-      [i|    return type("#{name}", (cls,), { "type_args": type_args })|]]
-    tupleTypeArgs = intercalate ", " [[i|type[#{typeArg}]|] | typeArg <- typeArgs]
+    decls = [[kindHint], kindDecls, fieldDecl] ++ accessors
+    classDecl = [i|class #{name}[#{intercalate ", " typeArgs}](TaggedUnion):|]
     typeArgs = ["T" ++ show i | i <- [1..arity]]
 genTaggedUnion _ = Nothing
 
@@ -224,11 +230,10 @@ generateBindings bindings = intercalate "\n\n" (imports : classes ++ aliases ++ 
   functions = mapMaybe genFunction bindings
   imports = intercalate "\n"
     ["from __future__ import annotations",
-     "from ctypes import c_int32, c_void_p, Structure",
-     "from functools import cache",
+     "from ctypes import c_int32, c_void_p",
      "from typing import Literal",
-     "from .base import \\",
-     "    Bool, call_export, init_tagged_union, Int, List, set_export_signature, String, Tuple"]
+     "from .base import \
+     \Bool, call_export, Int, List, set_export_signature, String, TaggedUnion, Tuple"]
 
 alignOffsetUp :: Int -> Int -> Int
 alignOffsetUp offset alignment =
