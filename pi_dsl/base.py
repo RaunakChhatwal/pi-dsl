@@ -64,13 +64,12 @@ class Tuple[*Ts](Structure):
 
     @classmethod
     @cache
-    def __class_getitem__(cls, type_args: tuple[type, ...]) -> type:
-        fields = [(f"field{i}", type_args[i]) for i in range(len(type_args))]
-        return type("Tuple", (cls,), {
-            "type_ctor": cls,
-            "type_args": type_args,
-            "_fields_": fields
-        })
+    def __class_getitem__(cls, type_args: tuple[type | TypeVar, ...]) -> type:
+        memory_fields = [(f"field{i}", type_args[i]) for i in range(len(type_args))]
+        type_fields: dict[str, Any] = { "type_ctor": cls, "type_args": type_args }
+        if all([isinstance(type_arg, type) for type_arg in type_args]):
+            type_fields["_fields_"] = memory_fields
+        return type("Tuple", (cls,), type_fields)
 
     def get(self) -> tuple[*Ts]:
         return tuple(getattr(self, f"field{i}") for i in range(len(self._fields_)))

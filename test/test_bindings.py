@@ -66,6 +66,16 @@ print(f"Term kind: {bool_term.kind}")
 bool_value = bool_term.get_lit_bool()
 print(f"Boolean value: {bool_value}")
 
+# Test Bind getter method
+print("Testing Bind getter method...")
+name = TName.init_fn(Tuple[String, Int](String("bool"), Int(42)))
+bind_value = Tuple[TName, Term](name, bool_term)
+bind_instance = Bind[TName, Term].init_b(bind_value)
+print(f"Bind kind: {bind_instance.kind}")
+bind = bind_instance.get_b()
+print("Retrieved bind tuple with type:",
+    f"{bind.type_ctor.__name__}[{', '.join([arg.__name__ for arg in bind.type_args])}]")
+
 # Shutdown Haskell runtime
 print("Shutting down Haskell runtime...")
 lib.pi_forall_exit.argtypes = []
