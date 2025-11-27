@@ -4,7 +4,7 @@ module Export where
 
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
-import Bindings (implStorable, alignOffsetUp, buildDeclOrder, sizeOf, alignment)
+import Bindings (implStorable, alignOffsetUp, buildDeclOrder, sizeOf, alignment, exportFunction)
 import Syntax(Epsilon, Term, Type)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)
@@ -13,6 +13,7 @@ import Data.String.Interpolate (i)
 import PrettyPrint (ppr)
 import Environment (Env, Err, runTcMonad)
 import TypeCheck (inferType)
+import Control.Monad (join)
 
 instance F.Storable Integer where
   alignment _ = alignment @Int
@@ -90,13 +91,7 @@ pprTerm ptr = do
 
 foreign export ccall "ppr_term" pprTerm :: F.Ptr Term -> IO (F.Ptr String)
 
-inferTypeF :: F.Ptr Env -> F.Ptr Term -> IO (F.Ptr (Either String Type))
-inferTypeF envPtr termPtr = do
-  env <- F.peek envPtr
-  term <- F.peek termPtr
-  res <- F.malloc
-  F.poke res =<< runTcMonad env (inferType term)
-  return res
-
-foreign export ccall "infer_type" inferTypeF
-  :: F.Ptr Env -> F.Ptr Term -> IO (F.Ptr (Either String Type))
+$(join $ exportFunction "infer_type"
+    <$> sequence [[t|Env|], [t|Term|]]
+    <*> [t|Either String Type|]
+    <*> [|\env term -> runTcMonad env (inferType term)|])

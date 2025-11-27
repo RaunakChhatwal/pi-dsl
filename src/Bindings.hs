@@ -3,7 +3,7 @@ module Bindings where
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
 import Language.Haskell.TH qualified as TH
-import Syntax (Epsilon, Term)
+import Syntax (Epsilon, Term, Type)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Set (Set)
 import Data.Set qualified as Set
@@ -18,7 +18,7 @@ import Control.Monad.Reader (asks, Reader, runReader)
 import Control.Monad.State (StateT (runStateT), get, modify, lift)
 import Control.Exception (assert)
 import Data.Char (toLower, isUpper, toUpper)
-import Control.Monad (zipWithM, join)
+import Control.Monad (zipWithM, join, replicateM)
 import Control.Arrow ((&&&))
 import Data.Bool (bool)
 import Data.Either (partitionEithers)
@@ -152,6 +152,12 @@ bindingFromName typeName = TH.reify typeName <&> \case
     return $ TypeAlias (TH.nameBase typeName) typeDef
   typeInfo -> error [i|Type info not implemented: #{TH.pprint typeInfo}|]
 
+functionBinding :: String -> [String] -> [TH.Type] -> TH.Type -> Binding
+functionBinding name paramNames paramTypes returnType =
+  Function name (zip paramNames paramTypeBindings) returnTypeBinding where
+  returnTypeBinding = runReader (typeBinding returnType) undefined
+  paramTypeBindings = runReader (mapM typeBinding paramTypes) undefined
+
 -- Unfold type application: F[A,B] -> (F, [A,B])
 unfoldApp :: TypeBinding -> (TypeBinding, [TypeBinding])
 unfoldApp (App a b) = second (++ [b]) (unfoldApp a)
@@ -193,12 +199,6 @@ genTaggedUnion (TaggedUnion name arity unionFields kindConstants) = let
   kindHint = [i|kind: Literal[#{intercalate ", " $ map show kindIndices}]|]
   kindDecls = [[i|#{constant} = #{index}|] | (index, constant) <- zip kindIndices kindConstants]
 
-  fieldDecl = [
-    "_fields_ = [",
-    "    (\"kind\", c_int32),",
-    "    (\"union\", c_void_p)",
-    "]" ]
-
   genInitMethod (fieldName, fieldType) =
     [[i|@classmethod|],
      [i|def init_#{fieldName}(cls, value: #{fieldType}):|],
@@ -212,11 +212,11 @@ genTaggedUnion (TaggedUnion name arity unionFields kindConstants) = let
 
   in Just $ intercalate ('\n':indentation) $ case arity of
   0 -> classDecl : intercalate [""] decls where
-    decls = [[kindHint], kindDecls, fieldDecl] ++ accessors
+    decls = [[kindHint], kindDecls] ++ accessors
     classDecl = [i|class #{name}(TaggedUnion):|]
 
   _ -> classDecl : intercalate [""] decls where
-    decls = [[kindHint], kindDecls, fieldDecl] ++ accessors
+    decls = [[kindHint], kindDecls] ++ accessors
     classDecl = [i|class #{name}[#{intercalate ", " typeArgs}](TaggedUnion):|]
     typeArgs = ["T" ++ show i | i <- [1..arity]]
 genTaggedUnion _ = Nothing
@@ -230,7 +230,6 @@ generateBindings bindings = intercalate "\n\n" (imports : classes ++ aliases ++ 
   functions = mapMaybe genFunction bindings
   imports = intercalate "\n"
     ["from __future__ import annotations",
-     "from ctypes import c_int32, c_void_p",
      "from typing import Literal",
      "from .base import \
      \Bool, call_export, Int, List, set_export_signature, String, TaggedUnion, Tuple"]
@@ -356,12 +355,39 @@ implStorable typeName = TH.reify typeName >>= \case
     Just <$> storableForAlias typeName (destructureCtor ctor)
   typeInfo -> error [i|Type info not implemented: #{TH.pprint typeInfo}|]
 
+-- Generate FFI export wrapper for a lambda expression with Storable types
+exportFunction :: String -> [TH.Type] -> TH.Type -> TH.Exp -> TH.Q [TH.Dec]
+exportFunction exportName paramTypes returnType function = do
+  name <- TH.newName exportName
+
+  -- ffi wrapper signature: F.Ptr a -> F.Ptr b -> ... -> IO (F.Ptr result)
+  wrapperParamTypes <- sequence [[t|F.Ptr $paramType|] | paramType <- map pure paramTypes]
+  wrapperReturnType <- [t|IO (F.Ptr $(pure returnType))|]
+  let wrapperType = foldr (TH.AppT . TH.AppT TH.ArrowT) wrapperReturnType wrapperParamTypes
+  let signature = TH.SigD name wrapperType
+
+  -- ffi wrapper definition
+  ptrNames <- replicateM (length paramTypes) (TH.newName "ptr")
+  argNames <- replicateM (length paramTypes) (TH.newName "arg")
+  peekStmts <- sequence [TH.BindS (TH.VarP argName) <$> [| F.peek $ptrName |]
+    | (argName, ptrName) <- zipWith (curry $ second $ pure . TH.VarE) argNames ptrNames]
+  let result = foldl TH.AppE function (map TH.VarE argNames)
+  (resultPtrPat, resultPtr) <- (TH.VarP &&& pure . TH.VarE) <$> TH.newName "resultPtr"
+  mallocStmt <- TH.BindS resultPtrPat <$> [| F.malloc |]
+  pokeStmt <- TH.NoBindS <$> [| F.poke $resultPtr =<< $(pure result) |]
+  returnStmt <- TH.NoBindS <$> [| return $resultPtr |]
+  let body = TH.NormalB $ TH.DoE Nothing $ peekStmts ++ [mallocStmt, pokeStmt, returnStmt]
+  let definition = TH.FunD name [TH.Clause (map TH.VarP ptrNames) body []]
+
+  -- ffi export declaration
+  let exportDecl = TH.ForeignD (TH.ExportF TH.CCall exportName name wrapperType)
+  return [signature, definition, exportDecl]
+
 dbg :: TH.Q TH.Exp
 dbg = do
   let stringify = TH.LitE . TH.StringL
   declOrder <- buildDeclOrder ''Env
-  classBindings <- (:) <$> bindingFromName ''Either <*> mapM bindingFromName declOrder
-  let paramTypeBindings = [("env", TypeVar "Env"), ("term", TypeVar "Term")]
-  let returnType = App (App (TypeVar "Either") (BaseType String)) (TypeVar "Type")
-  let bindings = classBindings ++ [Function "infer_type" paramTypeBindings returnType]
-  return $ stringify $ generateBindings bindings
+  bindings <- (:) <$> bindingFromName ''Either <*> mapM bindingFromName declOrder
+  inferTypeBinding <- functionBinding "infer_type" ["env", "term"]
+    <$> sequence [[t|Env|], [t|Term|]] <*> [t| Either String Type |]
+  return $ stringify $ generateBindings (bindings ++ [inferTypeBinding])

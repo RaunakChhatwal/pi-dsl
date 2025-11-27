@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from ctypes import c_size_t, c_void_p, POINTER, Structure
+from ctypes import c_int32, c_size_t, c_void_p, POINTER, Structure
 from functools import cache
 import subprocess as sp
 from typing import Any, cast, TypeVar
@@ -10,7 +10,17 @@ command = "fd pi-forall-lib.so dist-newstyle"
 path = sp.run(command.split(), capture_output=True, check=True, text=True).stdout.strip()
 lib = ctypes.CDLL(path)
 
+# Initialize Haskell runtime
+lib.pi_forall_init.argtypes = []
+lib.pi_forall_init.restype = None
+lib.pi_forall_init()
+
 class TaggedUnion(Structure):
+    _fields_ = [
+        ("kind", c_int32),
+        ("union", c_void_p)
+    ]
+
     def __init__(self, kind: int, value: Any):
         self.kind = ctypes.c_int32(kind)
         self.union = ctypes.cast(ctypes.pointer(value), c_void_p)
@@ -23,7 +33,7 @@ class TaggedUnion(Structure):
             type_args = (type_args,)
         return type(cls.__name__, (cls,), { "type_ctor": cls, "type_args": type_args })
 
-    def concretize_type_hint(self, hint: Any) -> Any:
+    def concretize_type_hint(self, hint: Any) -> type:
         if not hasattr(self, "type_args"):
             assert isinstance(hint, type)
             return hint
@@ -37,12 +47,12 @@ class TaggedUnion(Structure):
         concrete_args = tuple(map(self.concretize_type_hint, hint.type_args))
         return hint.type_ctor.__class_getitem__(concrete_args)
 
-    def get_field(self, field_type: Any) -> Any:
-        concrete_field_type = self.concretize_type_hint(field_type)
-        ptr_type = cast(Any, POINTER(concrete_field_type))
+    def get_field[T](self, field_type_hint: TypeVar | type[T]) -> T:
+        field_type = self.concretize_type_hint(field_type_hint)
+        ptr_type = cast(Any, POINTER(field_type))
         return ctypes.cast(self.union, ptr_type).contents
 
-class List[T](TaggedUnion):
+class List[T](Structure):
     _fields_ = [
         ("length", c_size_t),
         ("data", c_void_p)
@@ -52,6 +62,11 @@ class List[T](TaggedUnion):
         self.length = len(items)
         array_type = self.type_args[0] * len(items)
         self.data = ctypes.cast(array_type(*items), c_void_p)
+
+    @classmethod
+    @cache
+    def __class_getitem__(cls, type_args: type[T]):
+        return type("List", (cls,), { "type_ctor": cls, "type_args": (type_args,) })
 
     def get(self) -> list[T]:
         array_type = self.type_args[0] * self.length

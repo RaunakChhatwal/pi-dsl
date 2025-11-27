@@ -1,5 +1,4 @@
 from __future__ import annotations
-from ctypes import c_int32, c_void_p
 from typing import Literal
 from .base import Bool, call_export, Int, List, set_export_signature, String, TaggedUnion, Tuple
 
@@ -8,11 +7,6 @@ class Either[T1, T2](TaggedUnion):
     
     KIND_LEFT = 0
     KIND_RIGHT = 1
-    
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
     
     @classmethod
     def init_left(cls, value: T1):
@@ -36,11 +30,6 @@ class Name[T1](TaggedUnion):
     KIND_FN = 0
     KIND_BN = 1
     
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
-    
     @classmethod
     def init_fn(cls, value: Tuple[String, Int]):
         return cls(cls.KIND_FN, value)
@@ -62,21 +51,11 @@ class Epsilon(TaggedUnion):
     
     KIND_REL = 0
     KIND_IRR = 1
-    
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
 
 class Bind[T1, T2](TaggedUnion):
     kind: Literal[0]
     
     KIND_B = 0
-    
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
     
     @classmethod
     def init_b(cls, value: Tuple[T1, T2]):
@@ -91,11 +70,6 @@ class Arg(TaggedUnion):
     
     KIND_ARG = 0
     
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
-    
     @classmethod
     def init_arg(cls, value: Tuple[Epsilon, Term]):
         return cls(cls.KIND_ARG, value)
@@ -109,11 +83,6 @@ class Pattern(TaggedUnion):
     
     KIND_PAT_CON = 0
     KIND_PAT_VAR = 1
-    
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
     
     @classmethod
     def init_pat_con(cls, value: Tuple[DataConName, List[Tuple[Pattern, Epsilon]]]):
@@ -158,11 +127,6 @@ class Term(TaggedUnion):
     KIND_TY_CON = 21
     KIND_DATA_CON = 22
     KIND_CASE = 23
-    
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
     
     @classmethod
     def init_var(cls, value: TName):
@@ -305,11 +269,6 @@ class TypeDecl(TaggedUnion):
     
     KIND_TYPE_DECL = 0
     
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
-    
     @classmethod
     def init_type_decl(cls, value: Tuple[TName, Epsilon, Type]):
         return cls(cls.KIND_TYPE_DECL, value)
@@ -322,11 +281,6 @@ class ConstructorDef(TaggedUnion):
     kind: Literal[0]
     
     KIND_CONSTRUCTOR_DEF = 0
-    
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
     
     @classmethod
     def init_constructor_def(cls, value: Tuple[DataConName, Telescope]):
@@ -343,11 +297,6 @@ class Entry(TaggedUnion):
     KIND_DEF = 1
     KIND_DEMOTE = 2
     KIND_DATA = 3
-    
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
     
     @classmethod
     def init_decl(cls, value: TypeDecl):
@@ -385,11 +334,6 @@ class Env(TaggedUnion):
     kind: Literal[0]
     
     KIND_ENV = 0
-    
-    _fields_ = [
-        ("kind", c_int32),
-        ("union", c_void_p)
-    ]
     
     @classmethod
     def init_env(cls, value: Tuple[List[Entry], Int, List[TypeDecl]]):
