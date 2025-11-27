@@ -1,26 +1,16 @@
-import ctypes
-from ctypes import POINTER
 from pi_dsl import *
-
-# Test ppr_term function
-print("Testing ppr_term function...")
-lib.ppr_term.argtypes = [POINTER(Term)]
-lib.ppr_term.restype = POINTER(String)
 
 # Test ppr on boolean literals
 print("Creating boolean literals with init method...")
 true = Term.init_lit_bool(Bool(True))
 false = Term.init_lit_bool(Bool(False))
-result = lib.ppr_term(ctypes.byref(true)).contents
-print(f"ppr_term(True) = {result}")
-result = lib.ppr_term(ctypes.byref(false)).contents
-print(f"ppr_term(False) = {result}")
+print(f"ppr_term(True) = {ppr_term(true)}")
+print(f"ppr_term(False) = {ppr_term(false)}")
 
 # Pretty print if-then-else
 print("Testing if-then-else with init methods...")
 if_term = Term.init_if(Tuple[Term, Term, Term](true, false, true))
-result = lib.ppr_term(ctypes.byref(if_term)).contents
-print(f"ppr_term(if True then False else True) = {result}")
+print(f"ppr_term(if True then False else True) = {ppr_term(if_term)}")
 
 # Create an empty environment
 empty_entries = List[Entry]([])
@@ -39,9 +29,7 @@ match result.kind:
     case Either.KIND_LEFT:
         print(f"Error: {result.get_left()}")
     case Either.KIND_RIGHT:
-        inferred_type = result.get_right()
-        type_result = lib.ppr_term(ctypes.byref(inferred_type)).contents
-        print(f"Inferred type: {type_result}")
+        print(f"Inferred type: {ppr_term(result.get_right())}")
 
 # Test another getter method on Term
 print("Testing getter method on Term...")

@@ -82,14 +82,7 @@ foreign export ccall "sum_true" sumTrue :: F.Ptr [(Bool, Int)] -> IO Int
 $(pure . fromJust <$> implStorable ''Either)
 $(catMaybes <$> (mapM implStorable =<< buildDeclOrder ''Env))
 
-pprTerm :: F.Ptr Term -> IO (F.Ptr String)
-pprTerm ptr = do
-  term <- F.peek ptr
-  res <- F.malloc
-  F.poke res (ppr term)
-  return res
-
-foreign export ccall "ppr_term" pprTerm :: F.Ptr Term -> IO (F.Ptr String)
+$(join $ exportFunction "ppr_term" <$> sequence [[t|Term|]] <*> [t|String|] <*> [| return . ppr |])
 
 $(join $ exportFunction "infer_type"
     <$> sequence [[t|Env|], [t|Term|]]

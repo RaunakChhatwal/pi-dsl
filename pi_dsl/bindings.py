@@ -358,3 +358,7 @@ Telescope = List[Entry]
 set_export_signature("infer_type", [Env, Term], Either[String, Type])
 def infer_type(env: Env, term: Term) -> Either[String, Type]:
     return call_export("infer_type", [env, term])
+
+set_export_signature("ppr_term", [Term], String)
+def ppr_term(term: Term) -> String:
+    return call_export("ppr_term", [term])

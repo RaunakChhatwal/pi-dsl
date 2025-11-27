@@ -371,9 +371,9 @@ exportFunction exportName paramTypes returnType function = do
   argNames <- replicateM (length paramTypes) (TH.newName "arg")
   peekStmts <- sequence [TH.BindS (TH.VarP argName) <$> [| F.peek $ptrName |]
     | (argName, ptrName) <- zipWith (curry $ second $ pure . TH.VarE) argNames ptrNames]
-  let result = foldl TH.AppE function (map TH.VarE argNames)
   (resultPtrPat, resultPtr) <- (TH.VarP &&& pure . TH.VarE) <$> TH.newName "resultPtr"
   mallocStmt <- TH.BindS resultPtrPat <$> [| F.malloc |]
+  let result = foldl TH.AppE function (map TH.VarE argNames)
   pokeStmt <- TH.NoBindS <$> [| F.poke $resultPtr =<< $(pure result) |]
   returnStmt <- TH.NoBindS <$> [| return $resultPtr |]
   let body = TH.NormalB $ TH.DoE Nothing $ peekStmts ++ [mallocStmt, pokeStmt, returnStmt]
@@ -390,4 +390,6 @@ dbg = do
   bindings <- (:) <$> bindingFromName ''Either <*> mapM bindingFromName declOrder
   inferTypeBinding <- functionBinding "infer_type" ["env", "term"]
     <$> sequence [[t|Env|], [t|Term|]] <*> [t| Either String Type |]
-  return $ stringify $ generateBindings (bindings ++ [inferTypeBinding])
+  pprTermBinding <- functionBinding "ppr_term" ["term"]
+    <$> sequence [[t|Term|]] <*> [t| String |]
+  return $ stringify $ generateBindings (bindings ++ [inferTypeBinding, pprTermBinding])
