@@ -3,12 +3,9 @@ module Bindings where
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
 import Language.Haskell.TH qualified as TH
-import Syntax (Epsilon, Term, Type)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Set (Set)
 import Data.Set qualified as Set
-import Data.Tree (Tree)
-import Data.Tree qualified as Tree
 import Data.Functor ((<&>))
 import Data.List (intercalate, elemIndex)
 import Data.Bifunctor (second, first, bimap)
@@ -22,7 +19,6 @@ import Control.Monad (zipWithM, join, replicateM)
 import Control.Arrow ((&&&))
 import Data.Bool (bool)
 import Data.Either (partitionEithers, fromRight)
-import Environment (Env)
 import Data.Bifoldable (biList)
 
 destructureCtor :: TH.Con -> (TH.Name, [TH.Type])
@@ -385,16 +381,16 @@ exportFunction exportName paramTypes returnType function = do
   let exportDecl = TH.ForeignD (TH.ExportF TH.CCall exportName name wrapperType)
   return [signature, definition, exportDecl]
 
-dbg :: TH.Q TH.Exp
-dbg = do
-  let stringify = TH.LitE . TH.StringL
-  declOrder <- buildDeclOrder ''Env
-  bindings <- (++) <$> mapM bindingFromName [''Maybe, ''Either] <*> mapM bindingFromName declOrder
-  pprTermBinding <- functionBinding "ppr_term" ["term"]
-    <$> sequence [[t|Term|]] <*> [t|String|]
-  inferTypeBinding <- functionBinding "infer_type" ["env", "term"]
-    <$> sequence [[t|Env|], [t|Term|]] <*> [t| Either String Type |]
-  checkTypeBinding <- functionBinding "check_type" ["env", "term", "ty"]
-    <$> sequence [[t|Env|], [t|Term|], [t|Type|]] <*> [t| Maybe String |]
-  let functionBindings = [pprTermBinding, inferTypeBinding, checkTypeBinding]
-  return $ stringify $ generateBindings (bindings ++ functionBindings)
+-- dbg :: TH.Q TH.Exp
+-- dbg = do
+--   let stringify = TH.LitE . TH.StringL
+--   declOrder <- buildDeclOrder ''Env
+--   bindings <- (++) <$> mapM bindingFromName [''Maybe, ''Either] <*> mapM bindingFromName declOrder
+--   pprTermBinding <- functionBinding "ppr_term" ["term"]
+--     <$> sequence [[t|Term|]] <*> [t|String|]
+--   inferTypeBinding <- functionBinding "infer_type" ["env", "term"]
+--     <$> sequence [[t|Env|], [t|Term|]] <*> [t| Either String Type |]
+--   checkTypeBinding <- functionBinding "check_type" ["env", "term", "ty"]
+--     <$> sequence [[t|Env|], [t|Term|], [t|Type|]] <*> [t| Maybe String |]
+--   let functionBindings = [pprTermBinding, inferTypeBinding, checkTypeBinding]
+--   return $ stringify $ generateBindings (bindings ++ functionBindings)

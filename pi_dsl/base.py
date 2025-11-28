@@ -67,7 +67,7 @@ class List[T](Structure):
 
     @classmethod
     @cache
-    def __class_getitem__(cls, type_args: type[T]):
+    def __class_getitem__(cls, type_args: type[T]) -> type:
         return type("List", (cls,), { "type_ctor": cls, "type_args": (type_args,) })
 
     def get(self) -> list[T]:
@@ -91,11 +91,14 @@ class Tuple[*Ts](Structure):
     def get(self) -> tuple[*Ts]:
         return tuple(getattr(self, f"field{i}") for i in range(len(self._fields_)))
 
+def init_tuple[*Ts](*items: *Ts) -> Tuple[*Ts]:
+    return Tuple.__class_getitem__(tuple(map(type, items)))(*items)
+
 Char = ctypes.c_int32
 
 class String(List[Char]):
     def __init__(self, string: str):
-        return super().__init__([Char(ord(char)) for char in string])
+        super().__init__([Char(ord(char)) for char in string])
 
     def __repr__(self) -> str:
         return "".join([chr(int(code_point)) for code_point in super().get()])
