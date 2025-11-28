@@ -23,7 +23,10 @@ class TaggedUnion(Structure):
 
     def __init__(self, kind: int, value: Any):
         self.kind = ctypes.c_int32(kind)
-        self.union = ctypes.cast(ctypes.pointer(value), c_void_p)
+        if value is None:
+            self.union = c_void_p(None)
+        else:
+            self.union = ctypes.cast(ctypes.pointer(value), c_void_p)
 
     @classmethod
     @cache
@@ -49,8 +52,7 @@ class TaggedUnion(Structure):
 
     def get_field[T](self, field_type_hint: TypeVar | type[T]) -> T:
         field_type = self.concretize_type_hint(field_type_hint)
-        ptr_type = cast(Any, POINTER(field_type))
-        return ctypes.cast(self.union, ptr_type).contents
+        return ctypes.cast(self.union, cast(Any, POINTER(field_type))).contents
 
 class List[T](Structure):
     _fields_ = [

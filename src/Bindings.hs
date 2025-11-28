@@ -12,7 +12,7 @@ import Data.Tree qualified as Tree
 import Data.Functor ((<&>))
 import Data.List (intercalate, elemIndex)
 import Data.Bifunctor (second, first, bimap)
-import Data.Maybe (catMaybes, fromJust, mapMaybe)
+import Data.Maybe (catMaybes, fromJust, mapMaybe, maybeToList)
 import Data.String.Interpolate (i)
 import Control.Monad.Reader (asks, Reader, runReader)
 import Control.Monad.State (StateT (runStateT), get, modify, lift)
@@ -21,7 +21,7 @@ import Data.Char (toLower, isUpper, toUpper)
 import Control.Monad (zipWithM, join, replicateM)
 import Control.Arrow ((&&&))
 import Data.Bool (bool)
-import Data.Either (partitionEithers)
+import Data.Either (partitionEithers, fromRight)
 import Environment (Env)
 import Data.Bifoldable (biList)
 
@@ -85,8 +85,7 @@ data Binding =
   | TaggedUnion {
     name :: String,
     arity :: Int,
-    unionFields :: [Field],
-    kindConstants :: [String]
+    ctors :: [Either String Field]
   }
 
 -- Type parameter names for generic type resolution
@@ -113,16 +112,16 @@ snakeCase typeName = map toLower $ go (TH.nameBase typeName) where
   go (c1:c2:cs) | isUpper c2 = c1 : '_' : go (c2 : cs)
   go (c:cs) = c : go cs
 
--- Convert TH constructor to Python union field
-ctorBinding :: TH.Con -> Reader [TypeParamName] (Maybe Field)
-ctorBinding (TH.NormalC _ []) = return Nothing
+-- Convert TH constructor to Either nullary name or field
+ctorBinding :: TH.Con -> Reader [TypeParamName] (Either String Field)
+ctorBinding (TH.NormalC ctorName []) = return $ Left (snakeCase ctorName)
 ctorBinding (TH.NormalC ctorName [(_, paramType)]) =
-  Just . (snakeCase ctorName,) <$> typeBinding paramType
+  Right . (snakeCase ctorName,) <$> typeBinding paramType
 ctorBinding (TH.NormalC ctorName paramTypes) =
-  Just . (snakeCase ctorName,) . foldl App Tuple <$> mapM (typeBinding . snd) paramTypes
+  Right . (snakeCase ctorName,) . foldl App Tuple <$> mapM (typeBinding . snd) paramTypes
 ctorBinding (TH.RecC ctorName params) = assert (length params >= 2) $
   let paramTypes = [paramType | (_, _, paramType) <- params]
-  in Just . (snakeCase ctorName,) . foldl App Tuple <$> mapM typeBinding paramTypes
+  in Right . (snakeCase ctorName,) . foldl App Tuple <$> mapM typeBinding paramTypes
 ctorBinding ctor = error [i|Constructor not implemented: #{TH.pprint ctor}|]
 
 -- Extract name from TH type parameter
@@ -132,10 +131,8 @@ typeParamName (TH.KindedTV name _ _) = name
 
 -- Generate binding for data types with constructors
 dataBinding :: TH.Name -> [TH.TyVarBndr a] -> [TH.Con] -> Binding
-dataBinding typeName typeParams ctors = TaggedUnion name arity unionFields kindConstants where
-  kindConstants =
-    [[i|KIND_#{map toUpper $ snakeCase ctorName}|] | (ctorName, _) <- map destructureCtor ctors]
-  unionFields = runReader (catMaybes <$> mapM ctorBinding ctors) typeParamNames
+dataBinding typeName typeParams ctors = TaggedUnion name arity ctorBindings where
+  ctorBindings = runReader (mapM ctorBinding ctors) typeParamNames
   typeParamNames = map typeParamName typeParams
   arity = length typeParams
   name = TH.nameBase typeName
@@ -148,7 +145,7 @@ bindingFromName typeName = TH.reify typeName <&> \case
   TH.TyConI (TH.TySynD _ [] typeSynonym) -> TypeAlias (TH.nameBase typeName) typeDef
     where typeDef = runReader (typeBinding typeSynonym) []
   TH.TyConI (TH.NewtypeD [] _ [] Nothing ctor _) -> flip runReader [] $ do
-    (_, typeDef) <- fromJust <$> ctorBinding ctor
+    (_, typeDef) <- fromRight undefined <$> ctorBinding ctor
     return $ TypeAlias (TH.nameBase typeName) typeDef
   typeInfo -> error [i|Type info not implemented: #{TH.pprint typeInfo}|]
 
@@ -174,12 +171,12 @@ genTypeBinding (App a b) =
   [i|#{genTypeBinding typeCtor}[#{intercalate ", " (map genTypeBinding typeArgs)}]|]
   where (typeCtor, typeArgs) = unfoldApp (App a b)
 
-indentation :: String
-indentation = "    "
+indent :: String -> String
+indent snippet = intercalate "\n" $ map ("    " ++) $ lines snippet
 
 genFunction :: Binding -> Maybe String
 genFunction (Function name paramBindingss returnTypeBinding) =
-  Just (setSignature ++ "\n" ++ funcDecl ++ "\n" ++ indentation ++ funcBody) where
+  Just $ intercalate "\n" [setSignature, funcDecl, indent funcBody] where
   funcDecl = [i|def #{name}(#{paramList}) -> #{returnType}:|]
   paramList = intercalate ", " [[i|#{paramName}: #{paramType}|] | (paramName, paramType) <- params]
   funcBody = [i|return call_export("#{name}", [#{intercalate ", " $ map fst params}])|]
@@ -194,33 +191,38 @@ genTypeAlias (TypeAlias typeName typeDef) = Just [i|#{typeName} = #{genTypeBindi
 genTypeAlias _ = Nothing
 
 genTaggedUnion :: Binding -> Maybe String
-genTaggedUnion (TaggedUnion name arity unionFields kindConstants) = let
-  kindIndices = [0..length kindConstants - 1]
-  kindHint = [i|kind: Literal[#{intercalate ", " $ map show kindIndices}]|]
-  kindDecls = [[i|#{constant} = #{index}|] | (index, constant) <- zip kindIndices kindConstants]
+genTaggedUnion (TaggedUnion name arity ctors) =
+  Just $ classDecl ++ nullaryCtorInstances where
+  classDecl = [i|class #{name}#{typeArgs}(TaggedUnion):|] ++ "\n" ++ indent classBody
+  classBody = intercalate "\n\n" $ [kindHint, kindDecls] ++ nullaryCtorHints ++ accessors
+  typeArgs = if arity == 0 then ""
+    else [i|[#{intercalate ", " ["T" ++ show i | i <- [1..arity]]}]|]
 
-  genInitMethod (fieldName, fieldType) =
-    [[i|@classmethod|],
-     [i|def init_#{fieldName}(cls, value: #{fieldType}):|],
-     [i|    return cls(cls.KIND_#{map toUpper fieldName}, value)|]]
-  genGetMethod (fieldName, fieldType) =
-    [[i|def get_#{fieldName}(self) -> #{fieldType}:|],
-     [i|    assert self.kind == self.KIND_#{map toUpper fieldName}|],
-     [i|    return self.get_field(#{fieldType})|]]
+  nullaryCtorInstances = if null nullaryCtors then ""
+    else "\n\n" ++ intercalate "\n" (map nullaryCtorInstance nullaryCtors)
+  nullaryCtorInstance ctorName =
+    [i|#{name}.#{ctorName} = #{name}(#{name}.#{kindConstant ctorName}, None)|]
+  nullaryCtorHints = maybeToList $ if null nullaryCtors then Nothing
+    else Just $ intercalate "\n" [[i|#{ctorName}: ClassVar[Self]|] | ctorName <- nullaryCtors]
+
   accessors =
     concatMap (biList . (genInitMethod &&& genGetMethod) . second genTypeBinding) unionFields
+  (nullaryCtors, unionFields) = partitionEithers ctors
+  genGetMethod (fieldName, fieldType) = intercalate "\n"
+    [[i|def get_#{fieldName}(self) -> #{fieldType}:|],
+     [i|    assert self.kind == self.#{kindConstant fieldName}|],
+     [i|    return self.get_field(#{fieldType})|]]
+  genInitMethod (fieldName, fieldType) = intercalate "\n"
+    [[i|@classmethod|],
+     [i|def init_#{fieldName}(cls, value: #{fieldType}):|],
+     [i|    return cls(cls.#{kindConstant fieldName}, value)|]]
 
-  in Just $ intercalate ('\n':indentation) $ case arity of
-  0 -> classDecl : intercalate [""] decls where
-    decls = [[kindHint], kindDecls] ++ accessors
-    classDecl = [i|class #{name}(TaggedUnion):|]
-
-  _ -> classDecl : intercalate [""] decls where
-    decls = [[kindHint], kindDecls] ++ accessors
-    classDecl = [i|class #{name}[#{intercalate ", " typeArgs}](TaggedUnion):|]
-    typeArgs = ["T" ++ show i | i <- [1..arity]]
+  kindDecls = intercalate "\n" [[i|#{kindConstant ctorName} = #{index}|]
+    | (index, ctorName) <- zip kindIndices $ map (either id fst) ctors]
+  kindHint = [i|kind: Literal[#{intercalate ", " $ map show kindIndices}]|]
+  kindIndices = [0..length ctors - 1]
+  kindConstant ctorName = "KIND_" ++ map toUpper ctorName
 genTaggedUnion _ = Nothing
-
 
 -- Generate complete Python module with imports and class definitions
 generateBindings :: [Binding] -> String
@@ -230,7 +232,7 @@ generateBindings bindings = intercalate "\n\n" (imports : classes ++ aliases ++ 
   functions = mapMaybe genFunction bindings
   imports = intercalate "\n"
     ["from __future__ import annotations",
-     "from typing import Literal",
+     "from typing import ClassVar, Literal, Self",
      "from .base import \
      \Bool, call_export, Int, List, set_export_signature, String, TaggedUnion, Tuple"]
 
@@ -387,9 +389,12 @@ dbg :: TH.Q TH.Exp
 dbg = do
   let stringify = TH.LitE . TH.StringL
   declOrder <- buildDeclOrder ''Env
-  bindings <- (:) <$> bindingFromName ''Either <*> mapM bindingFromName declOrder
+  bindings <- (++) <$> mapM bindingFromName [''Maybe, ''Either] <*> mapM bindingFromName declOrder
+  pprTermBinding <- functionBinding "ppr_term" ["term"]
+    <$> sequence [[t|Term|]] <*> [t|String|]
   inferTypeBinding <- functionBinding "infer_type" ["env", "term"]
     <$> sequence [[t|Env|], [t|Term|]] <*> [t| Either String Type |]
-  pprTermBinding <- functionBinding "ppr_term" ["term"]
-    <$> sequence [[t|Term|]] <*> [t| String |]
-  return $ stringify $ generateBindings (bindings ++ [inferTypeBinding, pprTermBinding])
+  checkTypeBinding <- functionBinding "check_type" ["env", "term", "ty"]
+    <$> sequence [[t|Env|], [t|Term|], [t|Type|]] <*> [t| Maybe String |]
+  let functionBindings = [pprTermBinding, inferTypeBinding, checkTypeBinding]
+  return $ stringify $ generateBindings (bindings ++ functionBindings)

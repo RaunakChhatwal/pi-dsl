@@ -12,7 +12,7 @@ import Data.Functor ((<&>))
 import Data.String.Interpolate (i)
 import PrettyPrint (ppr)
 import Environment (Env, Err, runTcMonad)
-import TypeCheck (inferType)
+import TypeCheck (inferType, checkType)
 import Control.Monad (join)
 
 instance F.Storable Integer where
@@ -79,12 +79,17 @@ sumTrue ptr = sum . map snd . filter fst <$> F.peek ptr
 
 foreign export ccall "sum_true" sumTrue :: F.Ptr [(Bool, Int)] -> IO Int
 
-$(pure . fromJust <$> implStorable ''Either)
+$(mapM (fmap fromJust . implStorable) [''Maybe, ''Either])
 $(catMaybes <$> (mapM implStorable =<< buildDeclOrder ''Env))
 
 $(join $ exportFunction "ppr_term" <$> sequence [[t|Term|]] <*> [t|String|] <*> [| return . ppr |])
 
 $(join $ exportFunction "infer_type"
     <$> sequence [[t|Env|], [t|Term|]]
-    <*> [t|Either String Type|]
+    <*> [t| Either String Type |]
     <*> [|\env term -> runTcMonad env (inferType term)|])
+
+$(join $ exportFunction "check_type"
+    <$> sequence [[t|Env|], [t|Term|], [t|Type|]]
+    <*> [t| Maybe String |]
+    <*> [|\env term ty -> either Just (const Nothing) <$> runTcMonad env (checkType term ty)|])

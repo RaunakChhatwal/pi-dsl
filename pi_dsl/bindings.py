@@ -1,6 +1,24 @@
 from __future__ import annotations
-from typing import Literal
+from typing import ClassVar, Literal, Self
 from .base import Bool, call_export, Int, List, set_export_signature, String, TaggedUnion, Tuple
+
+class Maybe[T1](TaggedUnion):
+    kind: Literal[0, 1]
+    
+    KIND_NOTHING = 0
+    KIND_JUST = 1
+    
+    nothing: ClassVar[Self]
+    
+    @classmethod
+    def init_just(cls, value: T1):
+        return cls(cls.KIND_JUST, value)
+    
+    def get_just(self) -> T1:
+        assert self.kind == self.KIND_JUST
+        return self.get_field(T1)
+
+Maybe.nothing = Maybe(Maybe.KIND_NOTHING, None)
 
 class Either[T1, T2](TaggedUnion):
     kind: Literal[0, 1]
@@ -51,6 +69,12 @@ class Epsilon(TaggedUnion):
     
     KIND_REL = 0
     KIND_IRR = 1
+    
+    rel: ClassVar[Self]
+    irr: ClassVar[Self]
+
+Epsilon.rel = Epsilon(Epsilon.KIND_REL, None)
+Epsilon.irr = Epsilon(Epsilon.KIND_IRR, None)
 
 class Bind[T1, T2](TaggedUnion):
     kind: Literal[0]
@@ -127,6 +151,14 @@ class Term(TaggedUnion):
     KIND_TY_CON = 21
     KIND_DATA_CON = 22
     KIND_CASE = 23
+    
+    ty_type: ClassVar[Self]
+    trust_me: ClassVar[Self]
+    print_me: ClassVar[Self]
+    ty_unit: ClassVar[Self]
+    lit_unit: ClassVar[Self]
+    ty_bool: ClassVar[Self]
+    refl: ClassVar[Self]
     
     @classmethod
     def init_var(cls, value: TName):
@@ -264,6 +296,14 @@ class Term(TaggedUnion):
         assert self.kind == self.KIND_CASE
         return self.get_field(Tuple[Term, List[Match]])
 
+Term.ty_type = Term(Term.KIND_TY_TYPE, None)
+Term.trust_me = Term(Term.KIND_TRUST_ME, None)
+Term.print_me = Term(Term.KIND_PRINT_ME, None)
+Term.ty_unit = Term(Term.KIND_TY_UNIT, None)
+Term.lit_unit = Term(Term.KIND_LIT_UNIT, None)
+Term.ty_bool = Term(Term.KIND_TY_BOOL, None)
+Term.refl = Term(Term.KIND_REFL, None)
+
 class TypeDecl(TaggedUnion):
     kind: Literal[0]
     
@@ -355,10 +395,14 @@ TName = Name[Term]
 
 Telescope = List[Entry]
 
+set_export_signature("ppr_term", [Term], String)
+def ppr_term(term: Term) -> String:
+    return call_export("ppr_term", [term])
+
 set_export_signature("infer_type", [Env, Term], Either[String, Type])
 def infer_type(env: Env, term: Term) -> Either[String, Type]:
     return call_export("infer_type", [env, term])
 
-set_export_signature("ppr_term", [Term], String)
-def ppr_term(term: Term) -> String:
-    return call_export("ppr_term", [term])
+set_export_signature("check_type", [Env, Term, Type], Maybe[String])
+def check_type(env: Env, term: Term, ty: Type) -> Maybe[String]:
+    return call_export("check_type", [env, term, ty])
