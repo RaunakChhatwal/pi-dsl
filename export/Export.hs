@@ -38,22 +38,6 @@ instance (F.Storable a, F.Storable b) => F.Storable (a, b) where
     F.pokeByteOff ptr 0 a
     F.pokeByteOff ptr bOffset b
 
-addLength :: F.Ptr (Int, String) -> IO Int
-addLength ptr = do
-  (n, str) <- F.peek ptr
-  return $ n + fromIntegral (length str)
-
-foreign export ccall "add_length" addLength :: F.Ptr (Int, String) -> IO Int
-
-concatInt :: F.Ptr (String, Int) -> IO (F.Ptr String)
-concatInt ptr = do
-  (str, int) <- F.peek ptr
-  res <- F.malloc
-  F.poke res (str ++ show int)
-  return res
-
-foreign export ccall "concat_int" concatInt :: F.Ptr (String, Int) -> IO (F.Ptr String)
-
 instance F.Storable a => F.Storable [a] where
   alignment _ = max (alignment @F.CSize) (alignment @(F.Ptr a))
 
@@ -73,11 +57,6 @@ instance F.Storable a => F.Storable [a] where
     let len :: F.CSize = fromIntegral (length xs)
     F.pokeByteOff ptr 0 len
     F.pokeByteOff ptr dataOffset dataPtr
-
-sumTrue :: F.Ptr [(Bool, Int)] -> IO Int
-sumTrue ptr = sum . map snd . filter fst <$> F.peek ptr
-
-foreign export ccall "sum_true" sumTrue :: F.Ptr [(Bool, Int)] -> IO Int
 
 $(mapM (fmap fromJust . implStorable) [''Maybe, ''Either])
 $(catMaybes <$> (mapM implStorable =<< buildDeclOrder ''Env))
