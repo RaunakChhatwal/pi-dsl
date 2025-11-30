@@ -138,7 +138,7 @@ instance Disp Match
 
 instance Disp Telescope
 
-instance Disp ConstructorDef
+instance Disp CtorDef
 
 
 
@@ -192,10 +192,10 @@ instance Display Entry where
       (PP.vcat dc)
   
 
-instance Display ConstructorDef where
-  display (ConstructorDef c (Telescope [])) = do
+instance Display CtorDef where
+  display (CtorDef c (Telescope [])) = do
     pure $ PP.text c 
-  display (ConstructorDef c tele) = do
+  display (CtorDef c tele) = do
     dc <- display c
     dt <- display tele
     pure $ dc <+> PP.text "of" <+> dt 

@@ -119,7 +119,7 @@ inferType a = case a of
   (DataCon c args) -> do
     matches <- Env.lookupDConAll c
     case matches of
-      [(tname, (Telescope [], ConstructorDef _ (Telescope deltai)))] -> do
+      [(tname, (Telescope [], CtorDef _ (Telescope deltai)))] -> do
         let numArgs = length deltai
         unless (length args == numArgs) $
           Env.err
@@ -215,8 +215,7 @@ checkType tm ty = do
     (Let a bnd) -> do
       (x, b) <- unbind bnd
       tyA <- inferType a 
-      Env.extendCtxs [mkDecl x tyA, Def x a] $
-          checkType b ty' 
+      Env.extendCtxs [mkDecl x tyA, Def x a] (checkType b ty') 
     -- c-refl
     Refl -> case ty' of 
             (TyEq a b) -> Equal.equate a b
@@ -531,14 +530,14 @@ tcEntry (Data t (Telescope delta) cs) =
     edelta <- tcTypeTele delta
     ---- check that the telescope provided
     ---  for each data constructor is wellfomed, and elaborate them
-    let elabConstructorDef defn@(ConstructorDef d (Telescope tele)) =
+    let elabConstructorDef defn@(CtorDef d (Telescope tele)) =
           Env.extendCtx (Data t (Telescope delta) []) $
             Env.extendCtxTele delta $ do
               etele <- tcTypeTele tele
-              return (ConstructorDef d (Telescope tele))
+              return (CtorDef d (Telescope tele))
     ecs <- mapM elabConstructorDef cs
     -- Implicitly, we expect the constructors to actually be different...
-    let cnames = map (\(ConstructorDef c _) -> c) cs
+    let cnames = map (\(CtorDef c _) -> c) cs
     unless (length cnames == length (nub cnames)) $
       Env.err [DS "Datatype definition", DD t, DS "contains duplicated constructors"]
     -- finally, add the datatype to the env and perform action m
@@ -594,7 +593,7 @@ exhaustivityCheck scrut ty pats = do
             else Env.err $ DS "Missing case for" : map DD l
         loop (PatVar x : _) dcons = return ()
         loop (PatCon dc args : pats') dcons = do
-          (ConstructorDef _ (Telescope tele), dcons') <- removeDCon dc dcons
+          (CtorDef _ (Telescope tele), dcons') <- removeDCon dc dcons
           tele' <- substTele delta tys tele
           let (aargs, pats'') = relatedPats dc pats'
           -- check the arguments of the data constructor
@@ -603,9 +602,9 @@ exhaustivityCheck scrut ty pats = do
 
         -- make sure that the given list of constructors is impossible
         -- in the current environment
-        checkImpossible :: [ConstructorDef] -> TcMonad [DataConName]
+        checkImpossible :: [CtorDef] -> TcMonad [DataConName]
         checkImpossible [] = return []
-        checkImpossible (ConstructorDef dc (Telescope tele) : rest) = do
+        checkImpossible (CtorDef dc (Telescope tele) : rest) = do
           this <-
             ( do
                 tele' <- substTele delta tys tele
@@ -624,9 +623,9 @@ exhaustivityCheck scrut ty pats = do
 -- return it paired with the remainder of the list.
 removeDCon ::
   DataConName ->
-  [ConstructorDef] ->
-  TcMonad (ConstructorDef, [ConstructorDef])
-removeDCon dc (cd@(ConstructorDef dc' _) : rest)
+  [CtorDef] ->
+  TcMonad (CtorDef, [CtorDef])
+removeDCon dc (cd@(CtorDef dc' _) : rest)
   | dc == dc' =
     return (cd, rest)
 removeDCon dc (cd1 : rest) = do

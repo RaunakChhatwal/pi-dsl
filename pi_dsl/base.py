@@ -21,7 +21,7 @@ class TaggedUnion(Structure):
         ("union", c_void_p)
     ]
 
-    def __init__(self, kind: int, value: Any):
+    def __init__(self, kind: int, value: Any = None):
         self.kind = ctypes.c_int32(kind)
         if value is None:
             self.union = c_void_p(None)
@@ -60,7 +60,7 @@ class List[T](Structure):
         ("data", c_void_p)
     ]
 
-    def __init__(self, items: list[T]):
+    def __init__(self, *items: T):
         self.length = len(items)
         array_type = self.type_args[0] * len(items)
         self.data = ctypes.cast(array_type(*items), c_void_p)
@@ -73,6 +73,10 @@ class List[T](Structure):
     def get(self) -> list[T]:
         array_type = self.type_args[0] * self.length
         return list(array_type.from_address(self.data))
+
+def init_list[T](*items: T) -> List[T]:
+    assert len(items) > 0, "Cannot infer type from empty list"
+    return List.__class_getitem__(type(items[0]))(*items)
 
 class Tuple[*Ts](Structure):
     def __init__(self, *items: *Ts):
@@ -98,7 +102,7 @@ Char = ctypes.c_int32
 
 class String(List[Char]):
     def __init__(self, string: str):
-        super().__init__([Char(ord(char)) for char in string])
+        super().__init__(*[Char(ord(char)) for char in string])
 
     def __repr__(self) -> str:
         return "".join([chr(int(code_point)) for code_point in super().get()])

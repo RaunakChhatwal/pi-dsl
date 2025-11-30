@@ -170,7 +170,7 @@ data Entry
     -- | Adjust the context for relevance checking
   | Demote Epsilon  
   | -- | Datatype definition (must be at the module level)
-    Data TyConName Telescope [ConstructorDef]
+    Data TyConName Telescope [CtorDef]
   
   deriving (Show, Generic, Typeable)
   deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
@@ -194,7 +194,7 @@ data ConstructorNames = ConstructorNames
   deriving (Show, Eq, Ord, Generic, Typeable)
 
 -- | A Data constructor has a name and a telescope of arguments
-data ConstructorDef = ConstructorDef DataConName Telescope
+data CtorDef = CtorDef DataConName Telescope
   deriving (Show, Generic)
   deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
@@ -257,15 +257,15 @@ preludeDataDecls =
   , Data boolName   (Telescope []) [falseConstructorDef, trueConstructorDef]
   ]  where
         -- boolean
-        trueConstructorDef = ConstructorDef trueName (Telescope [])
-        falseConstructorDef = ConstructorDef falseName (Telescope [])
+        trueConstructorDef = CtorDef trueName (Telescope [])
+        falseConstructorDef = CtorDef falseName (Telescope [])
 
         -- unit
-        unitConstructorDef = ConstructorDef litUnitName (Telescope []) 
+        unitConstructorDef = CtorDef litUnitName (Telescope []) 
 
         -- Sigma-type
         sigmaTele = Telescope [declA, declB]
-        prodConstructorDef = ConstructorDef prodName (Telescope [declX, declY])
+        prodConstructorDef = CtorDef prodName (Telescope [declX, declY])
         declA = mkDecl aName TyType
         declB = mkDecl bName (TyPi Rel (Var aName) (Unbound.bind xName TyType))
         declX = mkDecl xName (Var aName)

@@ -104,7 +104,7 @@ lookupDef v = do
 lookupTCon ::
   (MonadReader Env m, MonadError Err m) =>
   TyConName ->
-  m (Telescope, Maybe [ConstructorDef])
+  m (Telescope, Maybe [CtorDef])
 lookupTCon v = do
   g <- asks ctx
   scanGamma g
@@ -129,14 +129,14 @@ lookupTCon v = do
 lookupDConAll ::
   (MonadReader Env m) =>
   DataConName ->
-  m [(TyConName, (Telescope, ConstructorDef))]
+  m [(TyConName, (Telescope, CtorDef))]
 lookupDConAll v = do
   g <- asks ctx
   scanGamma g
   where
     scanGamma [] = return []
     scanGamma ((Data v' delta cs) : g) =
-      case find (\(ConstructorDef v'' tele) -> v'' == v) cs of
+      case find (\(CtorDef v'' tele) -> v'' == v) cs of
         Nothing -> scanGamma g
         Just c -> do
           more <- scanGamma g
@@ -154,7 +154,7 @@ lookupDCon ::
 lookupDCon c tname = do
   matches <- lookupDConAll c
   case lookup tname matches of
-    Just (delta, ConstructorDef _ deltai) ->
+    Just (delta, CtorDef _ deltai) ->
       return (delta, deltai)
     Nothing ->
       err

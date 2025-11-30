@@ -197,21 +197,32 @@ genTaggedUnion (TaggedUnion name arity ctors) =
   nullaryCtorInstances = if null nullaryCtors then ""
     else "\n\n" ++ intercalate "\n" (map nullaryCtorInstance nullaryCtors)
   nullaryCtorInstance ctorName =
-    [i|#{name}.#{ctorName} = #{name}(#{name}.#{kindConstant ctorName}, None)|]
+    [i|#{name}.#{ctorName} = #{name}(#{name}.#{kindConstant ctorName})|]
   nullaryCtorHints = maybeToList $ if null nullaryCtors then Nothing
     else Just $ intercalate "\n" [[i|#{ctorName}: ClassVar[Self]|] | ctorName <- nullaryCtors]
 
   accessors =
-    concatMap (biList . (genInitMethod &&& genGetMethod) . second genTypeBinding) unionFields
+    concatMap (biList . (genInitMethod &&& genGetMethod) . second paramHints) unionFields
+  paramHints fieldType = map genTypeBinding $ case unfoldApp fieldType of
+    (Tuple, paramTypes) -> paramTypes
+    _ -> [fieldType]
   (nullaryCtors, unionFields) = partitionEithers ctors
-  genGetMethod (fieldName, fieldType) = intercalate "\n"
-    [[i|def get_#{fieldName}(self) -> #{fieldType}:|],
-     [i|    assert self.kind == self.#{kindConstant fieldName}|],
-     [i|    return self.get_field(#{fieldType})|]]
-  genInitMethod (fieldName, fieldType) = intercalate "\n"
+  genGetMethod (name, [paramHint]) = intercalate "\n"
+    [[i|def get_#{name}(self) -> #{paramHint}:|],
+     [i|    assert self.kind == self.#{kindConstant name}|],
+     [i|    return self.get_field(#{paramHint})|]]
+  genGetMethod (name, paramHints) = intercalate "\n"
+    [[i|def get_#{name}(self) -> tuple[#{intercalate ", " paramHints}]:|],
+     [i|    assert self.kind == self.#{kindConstant name}|],
+     [i|    return self.get_field(Tuple[#{intercalate ", " paramHints}]).get()|]]
+  genInitMethod (name, [paramHint]) = intercalate "\n"
     [[i|@classmethod|],
-     [i|def init_#{fieldName}(cls, value: #{fieldType}):|],
-     [i|    return cls(cls.#{kindConstant fieldName}, value)|]]
+     [i|def init_#{name}(cls, value: #{paramHint}):|],
+     [i|    return cls(cls.#{kindConstant name}, value)|]]
+  genInitMethod (name, paramHints) = intercalate "\n"
+    [[i|@classmethod|],
+     [i|def init_#{name}(cls, *values: *tuple[#{intercalate ", " paramHints}]):|],
+     [i|    return cls(cls.#{kindConstant name}, init_tuple(*values))|]]
 
   kindDecls = intercalate "\n" [[i|#{kindConstant ctorName} = #{index}|]
     | (index, ctorName) <- zip kindIndices $ map (either id fst) ctors]
@@ -229,8 +240,8 @@ generateBindings bindings = intercalate "\n\n" (imports : classes ++ aliases ++ 
   imports = intercalate "\n"
     ["from __future__ import annotations",
      "from typing import ClassVar, Literal, Self",
-     "from .base import \
-     \Bool, call_export, Int, List, set_export_signature, String, TaggedUnion, Tuple"]
+     "from .base import *"]
+    --  \Bool, call_export, Int, List, set_export_signature, String, TaggedUnion, Tuple"]
 
 alignOffsetUp :: Int -> Int -> Int
 alignOffsetUp offset alignment =
@@ -380,17 +391,3 @@ exportFunction exportName paramTypes returnType function = do
   -- ffi export declaration
   let exportDecl = TH.ForeignD (TH.ExportF TH.CCall exportName name wrapperType)
   return [signature, definition, exportDecl]
-
--- dbg :: TH.Q TH.Exp
--- dbg = do
---   let stringify = TH.LitE . TH.StringL
---   declOrder <- buildDeclOrder ''Env
---   bindings <- (++) <$> mapM bindingFromName [''Maybe, ''Either] <*> mapM bindingFromName declOrder
---   pprTermBinding <- functionBinding "ppr_term" ["term"]
---     <$> sequence [[t|Term|]] <*> [t|String|]
---   inferTypeBinding <- functionBinding "infer_type" ["env", "term"]
---     <$> sequence [[t|Env|], [t|Term|]] <*> [t| Either String Type |]
---   checkTypeBinding <- functionBinding "check_type" ["env", "term", "ty"]
---     <$> sequence [[t|Env|], [t|Term|], [t|Type|]] <*> [t| Maybe String |]
---   let functionBindings = [pprTermBinding, inferTypeBinding, checkTypeBinding]
---   return $ stringify $ generateBindings (bindings ++ functionBindings)
