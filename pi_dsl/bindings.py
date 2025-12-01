@@ -125,7 +125,7 @@ class Pattern(TaggedUnion):
         return self.get_field(TName)
 
 class Term(TaggedUnion):
-    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
     
     KIND_TY_TYPE = 0
     KIND_VAR = 1
@@ -134,27 +134,25 @@ class Term(TaggedUnion):
     KIND_TY_PI = 4
     KIND_ANN = 5
     KIND_TRUST_ME = 6
-    KIND_PRINT_ME = 7
-    KIND_LET = 8
-    KIND_TY_UNIT = 9
-    KIND_LIT_UNIT = 10
-    KIND_TY_BOOL = 11
-    KIND_LIT_BOOL = 12
-    KIND_IF = 13
-    KIND_TY_SIGMA = 14
-    KIND_PROD = 15
-    KIND_LET_PAIR = 16
-    KIND_TY_EQ = 17
-    KIND_REFL = 18
-    KIND_SUBST = 19
-    KIND_CONTRA = 20
-    KIND_TY_CON = 21
-    KIND_DATA_CON = 22
-    KIND_CASE = 23
+    KIND_LET = 7
+    KIND_TY_UNIT = 8
+    KIND_LIT_UNIT = 9
+    KIND_TY_BOOL = 10
+    KIND_LIT_BOOL = 11
+    KIND_IF = 12
+    KIND_TY_SIGMA = 13
+    KIND_PROD = 14
+    KIND_LET_PAIR = 15
+    KIND_TY_EQ = 16
+    KIND_REFL = 17
+    KIND_SUBST = 18
+    KIND_CONTRA = 19
+    KIND_TY_CON = 20
+    KIND_DATA_CON = 21
+    KIND_CASE = 22
     
     ty_type: ClassVar[Self]
     trust_me: ClassVar[Self]
-    print_me: ClassVar[Self]
     ty_unit: ClassVar[Self]
     lit_unit: ClassVar[Self]
     ty_bool: ClassVar[Self]
@@ -298,7 +296,6 @@ class Term(TaggedUnion):
 
 Term.ty_type = Term(Term.KIND_TY_TYPE)
 Term.trust_me = Term(Term.KIND_TRUST_ME)
-Term.print_me = Term(Term.KIND_PRINT_ME)
 Term.ty_unit = Term(Term.KIND_TY_UNIT)
 Term.lit_unit = Term(Term.KIND_LIT_UNIT)
 Term.ty_bool = Term(Term.KIND_TY_BOOL)

@@ -56,8 +56,6 @@ data Term
     Ann Term Type
   | -- | an axiom 'TRUSTME', inhabits all types
     TrustMe
-  | -- | a directive to the type checker to print out the current context
-    PrintMe
   | -- | let expression, introduces a new (non-recursive) definition in the ctx
     -- | `let x = a in b`
     Let Term (Unbound.Bind TName Term)
@@ -127,30 +125,6 @@ data Pattern
   | PatVar TName
   deriving (Show, Eq, Generic, Typeable, Unbound.Alpha, Unbound.Subst Term)
 
-
------------------------------------------
-
--- * Modules and declarations
-
------------------------------------------
-
--- | module names
-type ModuleName = String
-
--- | A Module has a name, a list of imports, a list of declarations,
---   and a set of constructor names (which affect parsing).
-data Module = Module
-  { moduleName :: ModuleName,
-    moduleImports :: [ModuleImport],
-    moduleEntries :: [Entry] ,
-    moduleConstructors :: ConstructorNames 
-  }
-  deriving (Show, Generic, Typeable, Unbound.Alpha)
-
--- | References to other modules (brings declarations and definitions into scope)
-newtype ModuleImport = ModuleImport ModuleName
-  deriving (Show, Eq, Generic, Typeable)
-  deriving anyclass (Unbound.Alpha)
 
 -- | A type declaration 
 data TypeDecl = TypeDecl {declName :: TName , declEp :: Epsilon  , declType :: Type}

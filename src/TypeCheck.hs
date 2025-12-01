@@ -2,7 +2,7 @@
 
 -- | The main routines for type-checking
 {-# HLINT ignore "Use forM_" #-}
-module TypeCheck (tcModules, inferType, checkType) where
+module TypeCheck (inferType, checkType, tcEntry, HintOrCtx(..)) where
 
 import Control.Monad.Except
 import Control.Monad (unless, foldM)
@@ -170,11 +170,6 @@ checkType tm ty = do
       _ -> Env.err [DS "Lambda expression should have a function type, not", DD ty']
 
     TrustMe -> return ()
-
-    PrintMe -> do
-      gamma <- Env.getLocalCtx
-      Env.warn [DS "Unmet obligation.\nContext:", DD gamma,
-            DS "\nGoal:", DD ty']  
 
     -- Extensions to the core language
     -- c-if
@@ -432,53 +427,6 @@ tcTypeTele (Decl decl : tl) = do
 tcTypeTele tele = 
   Env.err [DS "Invalid telescope: ", DD tele]
 
-
-
---------------------------------------------------------
--- Using the typechecker for decls and modules and stuff
---------------------------------------------------------
-
--- | Typecheck a collection of modules. Assumes that each module
--- appears after its dependencies. Returns the same list of modules
--- with each definition typechecked
-tcModules :: [Module] -> TcMonad [Module]
-tcModules = foldM tcM []
-  where
-    -- Check module m against modules in defs, then add m to the list.
-    defs `tcM` m = do
-      -- "M" is for "Module" not "monad"
-      let name = moduleName m
-      liftIO $ putStrLn $ "Checking module " ++ show name
-      m' <- defs `tcModule` m
-      return $ defs ++ [m']
-
--- | Typecheck an entire module.
-tcModule ::
-  -- | List of already checked modules (including their entries).
-  [Module] ->
-  -- | Module to check.
-  Module ->
-  -- | The same module with all entries checked and elaborated.
-  TcMonad Module
-tcModule defs m' = do
-  checkedEntries <-
-    Env.extendCtxMods importedModules $
-      foldr
-        tcE
-        (return [])
-        (moduleEntries m')
-  return $ m' {moduleEntries = checkedEntries}
-  where
-    d `tcE` m = do
-      -- Extend the Env per the current Entry before checking
-      -- subsequent entries.
-      x <- tcEntry d
-      case x of
-        AddHint hint -> Env.extendHints hint m
-        -- Add decls to the entries to be returned
-        AddCtx decls -> (decls ++) <$> Env.extendCtxsGlobal decls m
-    -- Get all of the defs from imported modules (this is the env to check current module in)
-    importedModules = filter (\x -> ModuleImport (moduleName x) `elem` moduleImports m') defs
 
 -- | The Env-delta returned when type-checking a top-level Entry.
 data HintOrCtx

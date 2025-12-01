@@ -116,10 +116,6 @@ instance Disp (Unbound.Name Term) where
 
 instance Disp Term
 
-instance Disp Module
-
-instance Disp ModuleImport
-
 instance Disp Entry
 
 instance Disp [Entry]
@@ -141,24 +137,6 @@ instance Disp Telescope
 instance Disp CtorDef
 
 
-
-------------------------------------------------------------------------
-
--- * Display Instances for Modules
-
--------------------------------------------------------------------------
-
-instance Display Module where
-  display m = do
-    dn <- display (moduleName m)
-    di <- mapM display (moduleImports m)
-    de <- mapM display (moduleEntries m)
-    pure $ PP.text "module" <+> dn <+> PP.text "where"
-      $$ PP.vcat di
-      $$ PP.vcat de
-
-instance Display ModuleImport where
-  display (ModuleImport i) = pure $ PP.text "import" <+> disp i
 
 instance Display [Entry] where
   display ds = do
@@ -374,8 +352,6 @@ instance Display Term where
       else display a
   display TrustMe = do
     return $ PP.text "TRUSTME"
-  display PrintMe = do
-    return $ PP.text "PRINTME"
   display TyUnit = return $ PP.text "Unit"
   display LitUnit = return $ PP.text "()"
   display TyBool = return $ PP.text "Bool"

@@ -3,10 +3,9 @@
 -- | Utilities for managing a typechecking context.
 module Environment where
 
-import Control.Monad.Except (MonadError(..), ExceptT, runExceptT)
+import Control.Monad.Except (MonadError(..), Except, runExcept)
 import Control.Monad.Reader (MonadReader(local), asks, ReaderT(runReaderT))
 import Control.Monad (unless)
-import Control.Monad.IO.Class (MonadIO(..))
 import Data.List 
 import Data.Maybe (listToMaybe)
 import PrettyPrint (SourcePos, render, D(..), Disp(..), Doc, ppr)
@@ -19,13 +18,13 @@ import Data.Bifunctor (first)
 -- environment), freshness state (for supporting locally-nameless
 -- representations), error (for error reporting), and IO
 -- (for e.g.  warning messages).
-type TcMonad = Unbound.FreshMT (ReaderT Env (ExceptT Err IO))
+type TcMonad = Unbound.FreshMT (ReaderT Env (Except Err))
 
 -- | Entry point for the type checking monad, given an
 -- initial environment, returns either an error message
 -- or some result.
 runTcMonad :: Env -> TcMonad a -> IO (Either String a)
-runTcMonad env m = first ppr <$> runExceptT (runReaderT (Unbound.runFreshMT m) env)
+runTcMonad env m = return $ first ppr $ runExcept (runReaderT (Unbound.runFreshMT m) env)
 
 -- | Environment manipulation and accessing functions
 -- The context 'gamma' is a list
@@ -182,17 +181,10 @@ extendCtxs ds =
 
 -- | Extend the context with a list of bindings, marking them as "global"
 extendCtxsGlobal :: (MonadReader Env m) => [Entry] -> m a -> m a
-extendCtxsGlobal ds =
-  local
-    ( \m@Env {ctx = cs} ->
-        m
-          { ctx = ds ++ cs,
-            globals = length (ds ++ cs)
-          }
-    )
+extendCtxsGlobal ds = local $ \m@Env {ctx = cs} -> m { ctx = ds ++ cs, globals = length (ds ++ cs) }
 
 -- | Extend the context with a telescope
-extendCtxTele :: (MonadReader Env m, MonadIO m, MonadError Err m) => [Entry] -> m a -> m a
+extendCtxTele :: (MonadReader Env m, MonadError Err m) => [Entry] -> m a -> m a
 extendCtxTele [] m = m
 extendCtxTele (Def x t2 : tele) m =
   extendCtx (Def x t2) $ extendCtxTele tele m
@@ -202,15 +194,6 @@ extendCtxTele ( _ : tele) m =
   err [DS "Invalid telescope ", DD tele]
 
 
-
--- | Extend the context with a module
--- Note we must reverse the order.
-extendCtxMod :: (MonadReader Env m) => Module -> m a -> m a
-extendCtxMod m = extendCtxs (reverse $ moduleEntries m)
-
--- | Extend the context with a list of modules
-extendCtxMods :: (MonadReader Env m) => [Module] -> m a -> m a
-extendCtxMods mods k = foldr extendCtxMod k mods
 
 -- | Get the complete current context
 getCtx :: MonadReader Env m => m [Entry]
@@ -255,10 +238,6 @@ instance Disp Err where
 -- | Throw an error
 err :: (Disp a, MonadError Err m, MonadReader Env m) => [a] -> m b
 err d = throwError $ Err (sep $ map disp d)
-
--- | Print a warning
-warn :: (Disp a, MonadReader Env m, MonadIO m) => a -> m ()
-warn e = liftIO $ putStrLn $ "warning: " ++ render (disp (Err (disp e)))
 
 checkStage ::
   (MonadReader Env m, MonadError Err m) =>

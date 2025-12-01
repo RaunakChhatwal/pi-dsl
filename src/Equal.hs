@@ -40,7 +40,6 @@ equate t1 t2 = do
       equate tyB1 tyB2
 
     (TrustMe, TrustMe) ->  return ()
-    (PrintMe, PrintMe) ->  return ()
     
     (TyUnit, TyUnit)   -> return ()
     (LitUnit, LitUnit) -> return ()
