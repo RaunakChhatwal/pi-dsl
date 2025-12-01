@@ -11,7 +11,7 @@ import Data.Maybe (catMaybes, fromJust)
 import Data.Functor ((<&>))
 import Data.String.Interpolate (i)
 import PrettyPrint (ppr)
-import Environment (Env, Err, runTcMonad, TcMonad)
+import Environment (Env, Err, runTcMonad, TcMonad, Trace, traceTcMonad)
 import TypeCheck (checkType, inferType, tcEntry, HintOrCtx(..))
 import Control.Monad (join, foldM_, void)
 import qualified Environment as Env
@@ -61,18 +61,28 @@ instance F.Storable a => F.Storable [a] where
     F.pokeByteOff ptr 0 len
     F.pokeByteOff ptr dataOffset dataPtr
 
-$(mapM (fmap fromJust . implStorable) [''Maybe, ''Either])
+$(mapM (fmap fromJust . implStorable) [''Maybe, ''Either, ''Trace])
 $(catMaybes <$> (mapM implStorable =<< buildDeclOrder ''Env))
 
 $(join $ exportFunction "ppr_term" <$> sequence [[t|Term|]] <*> [t|String|] <*> [| return . ppr |])
 
-typeCheck :: [Entry] -> IO (Maybe String)
-typeCheck entries = either Just (const Nothing) <$> runTcMonad emptyEnv tcEntries where
-  tcEntries = foldr1 tcNextEntry (map tcEntry entries)
+tcEntries :: [Entry] -> TcMonad HintOrCtx
+tcEntries entries = foldr1 tcNextEntry (map tcEntry entries) where
   tcNextEntry curr next = curr >>= \case
     AddHint hint -> Env.extendHints hint next
     AddCtx decls -> Env.extendCtxsGlobal decls next
-  emptyEnv = Env.Env [] 0 []
+
+typeCheck :: [Entry] -> IO (Maybe String)
+-- typeCheck entries = return $ either Just (const Nothing) $ runTcMonad $ tcEntries entries
+typeCheck entries = return $ runTcMonad $ tcEntries entries
+
+-- traceTypeCheck :: [Entry] -> IO (Either String [Trace])
+-- traceTypeCheck entries = undefined
 
 $(join $ exportFunction "type_check"
-    <$> sequence [[t| [Entry] |]] <*> [t| Maybe String |] <*> [|typeCheck|])
+  <$> sequence [[t| [Entry] |]] <*> [t| Maybe String |] <*> [|typeCheck|])
+
+$(join $ exportFunction "trace_type_check"
+    <$> sequence [[t| [Entry] |]]
+    <*> [t| (Maybe String, [Trace]) |]
+    <*> [| return . traceTcMonad . tcEntries |])

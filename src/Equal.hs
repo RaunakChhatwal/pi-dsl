@@ -12,6 +12,7 @@ import qualified Unbound.Generics.LocallyNameless as Unbound
 
 import Control.Monad.Except (catchError)
 import Control.Monad (unless, zipWithM, zipWithM_)
+import Control.Monad.Trans (lift)
 
 -- | compare two expressions for equality
 -- first check if they are alpha equivalent then
@@ -69,7 +70,7 @@ equate t1 t2 = do
       
     (LetPair s1 bnd1, LetPair s2 bnd2) -> do  
       equate s1 s2
-      ((x,y), body1, _, body2) <- Unbound.unbind2Plus bnd1 bnd2
+      ((x,y), body1, _, body2) <- lift $ Unbound.unbind2Plus bnd1 bnd2
       equate body1 body2
     (TyEq a b, TyEq c d) -> do
       equate a c 

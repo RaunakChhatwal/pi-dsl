@@ -6,6 +6,7 @@ module Environment where
 import Control.Monad.Except (MonadError(..), Except, runExcept)
 import Control.Monad.Reader (MonadReader(local), asks, ReaderT(runReaderT))
 import Control.Monad (unless)
+import Control.Monad.Trans (lift)
 import Data.List 
 import Data.Maybe (listToMaybe)
 import PrettyPrint (SourcePos, render, D(..), Disp(..), Doc, ppr)
@@ -13,18 +14,41 @@ import Syntax
 import Text.PrettyPrint.HughesPJ (($$), nest, sep, text, vcat)
 import qualified Unbound.Generics.LocallyNameless as Unbound
 import Data.Bifunctor (first)
+import Streaming (Stream, Of)
+import qualified Streaming.Prelude as S
+-- import qualified Debug.Trace as T
+
+data Trace = Invoc String [String] | Event String | Result String
+
+traceM :: String -> [String] -> (a -> String) -> TcMonad a -> TcMonad a
+traceM funcName args toStr monad = do
+  S.yield $ Invoc funcName args
+  result <- monad
+  S.yield $ Result $ toStr result
+  return result
 
 -- | The type checking Monad includes a reader (for the
 -- environment), freshness state (for supporting locally-nameless
 -- representations), error (for error reporting), and IO
 -- (for e.g.  warning messages).
-type TcMonad = Unbound.FreshMT (ReaderT Env (Except Err))
+type TcMonad = Stream (Of Trace) (Unbound.FreshMT (ReaderT Env (Except Err)))
 
--- | Entry point for the type checking monad, given an
--- initial environment, returns either an error message
--- or some result.
-runTcMonad :: Env -> TcMonad a -> IO (Either String a)
-runTcMonad env m = return $ first ppr $ runExcept (runReaderT (Unbound.runFreshMT m) env)
+instance Unbound.Fresh TcMonad where
+  fresh = lift . Unbound.fresh
+
+runTcMonad :: TcMonad a -> Maybe String
+runTcMonad stream = fst $ traceTcMonad stream
+  -- first ppr $ runExcept $ runReaderT (Unbound.runFreshMT (S.effects stream)) emptyEnv
+
+emptyEnv :: Env
+emptyEnv = Env [] 0 []
+
+traceTcMonad :: TcMonad a -> (Maybe String, [Trace])
+traceTcMonad = go [] where
+  go traces stream = case runExcept $ runReaderT (Unbound.runFreshMT $ S.next stream) emptyEnv of
+    Left error -> (Just $ ppr error, reverse traces)
+    Right (Left _) -> (Nothing, reverse traces)
+    Right (Right (trace, rest)) -> go (trace : traces) rest
 
 -- | Environment manipulation and accessing functions
 -- The context 'gamma' is a list

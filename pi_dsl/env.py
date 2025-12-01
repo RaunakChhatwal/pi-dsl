@@ -25,6 +25,6 @@ type Entry = TypeDecl | Def | DataType
 
 def type_check(entries: list[Entry]):
     entry_bindings = [entry.entry_binding() for entry in entries]
-    result = bindings.type_check(List[bindings.Entry](*entry_bindings))
-    if result.kind == Maybe.KIND_JUST:
-        raise Exception(result.get_just())
+    error = bindings.type_check(List[bindings.Entry](*entry_bindings))
+    if error.kind == Maybe.KIND_JUST:
+        raise Exception(error.get_just())

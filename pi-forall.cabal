@@ -46,7 +46,8 @@ common shared-properties
     HUnit,
     QuickCheck,
     template-haskell,
-    string-interpolate
+    string-interpolate,
+    streaming
   if !impl(ghc >= 8.0)
     build-depends: semigroups       
  

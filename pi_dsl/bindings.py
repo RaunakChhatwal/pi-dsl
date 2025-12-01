@@ -42,6 +42,37 @@ class Either[T1, T2](TaggedUnion):
         assert self.kind == self.KIND_RIGHT
         return self.get_field(T2)
 
+class Trace(TaggedUnion):
+    kind: Literal[0, 1, 2]
+    
+    KIND_INVOC = 0
+    KIND_EVENT = 1
+    KIND_RESULT = 2
+    
+    @classmethod
+    def init_invoc(cls, *values: *tuple[String, List[String]]):
+        return cls(cls.KIND_INVOC, init_tuple(*values))
+    
+    def get_invoc(self) -> tuple[String, List[String]]:
+        assert self.kind == self.KIND_INVOC
+        return self.get_field(Tuple[String, List[String]]).get()
+    
+    @classmethod
+    def init_event(cls, value: String):
+        return cls(cls.KIND_EVENT, value)
+    
+    def get_event(self) -> String:
+        assert self.kind == self.KIND_EVENT
+        return self.get_field(String)
+    
+    @classmethod
+    def init_result(cls, value: String):
+        return cls(cls.KIND_RESULT, value)
+    
+    def get_result(self) -> String:
+        assert self.kind == self.KIND_RESULT
+        return self.get_field(String)
+
 class Name[T1](TaggedUnion):
     kind: Literal[0, 1]
     
@@ -399,3 +430,7 @@ def ppr_term(term: Term) -> String:
 set_export_signature("type_check", [List[Entry]], Maybe[String])
 def type_check(entries: List[Entry]) -> Maybe[String]:
     return call_export("type_check", [entries])
+
+set_export_signature("trace_type_check", [List[Entry]], Tuple[Maybe[String], List[Trace]])
+def trace_type_check(entries: List[Entry]) -> Tuple[Maybe[String], List[Trace]]:
+    return call_export("trace_type_check", [entries])

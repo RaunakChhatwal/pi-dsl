@@ -7,30 +7,25 @@ module TypeCheck (inferType, checkType, tcEntry, HintOrCtx(..)) where
 import Control.Monad.Except
 import Control.Monad (unless, foldM)
 import Control.Monad.IO.Class (liftIO)
-import Data.List (nub)
+import Data.List (nub, intercalate)
 
 import Data.Maybe ( catMaybes )
 
-import Environment (TcMonad)
+import Environment (TcMonad, traceM)
 import Environment qualified as Env
 import Equal qualified
-import PrettyPrint (D(DS, DD), Disp (disp), debug)
+import PrettyPrint (D(DS, DD), Disp (disp), debug, ppr, debugDisp)
 import Syntax
-import Debug.Trace
 
 import Text.PrettyPrint.HughesPJ (($$), render)
 
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Unbound.Generics.LocallyNameless.Unsafe (unsafeUnbind)
-
-
-
-
----------------------------------------------------------------------
+import Data.String.Interpolate (i)
 
 -- | Infer/synthesize the type of a term
 inferType :: Term -> TcMonad Type
-inferType a = case a of
+inferType a = traceM "inferType" [ppr a] ppr $ case a of
   -- i-var
   (Var x) -> do
     decl <- Env.lookupTy x     -- make sure the variable is accessible
@@ -154,7 +149,7 @@ tcType tm = Env.withStage Irr $  checkType tm TyType
 -------------------------------------------------------------------------
 -- | Check that the given term has the expected type
 checkType :: Term -> Type -> TcMonad ()
-checkType tm ty = do
+checkType tm ty = traceM "checkType" [ppr tm, ppr ty] (const "") $ do
   ty' <- Equal.whnf ty 
   case tm of 
     -- c-lam: check the type of a function
@@ -433,47 +428,41 @@ data HintOrCtx
   = AddHint TypeDecl
   | AddCtx [Entry]
 
+instance Disp HintOrCtx where
+  disp (AddHint typeDecl) = disp @String [i|AddHint:\n#{ppr typeDecl}|]
+  disp (AddCtx decls) = disp @String [i|AddCtx:\n#{intercalate "\n" $ map ppr decls}|]
+  debugDisp = disp
+
 -- | Check each sort of declaration in a module
 tcEntry :: Entry -> TcMonad HintOrCtx
-tcEntry (Def n term) = do
-  oldDef <- Env.lookupDef n
-  maybe tc die oldDef
-  where
-    tc = do
-      lkup <- Env.lookupHint n
-      case lkup of
-        Nothing -> do
-          ty <- inferType term
-          return $ AddCtx [Decl (TypeDecl n Rel ty), Def n term]
-        Just decl ->
-          let handler (Env.Err msg) = throwError $ Env.Err (msg $$ msg')
-              msg' =
-                disp
-                  [ 
-                    DS "When checking the term",
-                    DD term,
-                    DS "against the type",
-                    DD decl
-                  ]
-           in do
-                Env.extendCtx (Decl decl) $ checkType term (declType decl) `catchError` handler
-                return $ AddCtx [Decl decl, Def n term]
-    die term' = Env.err
-      [ DS "Multiple definitions of",
-        DD n,
-        DS "Previous definition was",
-        DD term'
-      ]
-tcEntry (Decl decl) = do
-  duplicateTypeBindingCheck decl
-  tcType (declType decl)
-  return $ AddHint decl
-tcEntry (Demote ep) = return (AddCtx [Demote ep])
+tcEntry entry = traceM "tcEntry" [ppr entry] ppr $ case entry of
+  Def n term -> do
+    oldDef <- Env.lookupDef n
+    maybe tc die oldDef
+    where
+      tc = do
+        lkup <- Env.lookupHint n
+        case lkup of
+          Nothing -> do
+            ty <- inferType term
+            return $ AddCtx [Decl (TypeDecl n Rel ty), Def n term]
+          Just decl -> let
+            handler (Env.Err msg) = throwError $ Env.Err (msg $$ msg')
+            msg' = disp [ DS "When checking the term", DD term, DS "against the type", DD decl ]
+            in do
+              Env.extendCtx (Decl decl) $ checkType term (declType decl) `catchError` handler
+              return $ AddCtx [Decl decl, Def n term]
+      die term' = Env.err
+        [DS "Multiple definitions of", DD n, DS "Previous definition was", DD term']
+  Decl decl -> do
+    duplicateTypeBindingCheck decl
+    tcType (declType decl)
+    return $ AddHint decl
+  Demote ep -> return (AddCtx [Demote ep])
 
 
 -- rule Entry_data
-tcEntry (Data t (Telescope delta) cs) =
-  do
+  Data t (Telescope delta) cs -> do
     -- Check that the telescope for the datatype definition is well-formed
     edelta <- tcTypeTele delta
     ---- check that the telescope provided
