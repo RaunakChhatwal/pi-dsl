@@ -1,17 +1,30 @@
+from dataclasses import dataclass
 from .base import *
-from .bindings import *
+from . import bindings
+from .bindings import Epsilon, Maybe
+from .term import DataType, Term, Type, Var
 
-sigma_prod = CtorDef.init_ctor_def(String("Prod"), List[Entry]())
-sigma_entry = Entry.init_data(String("Sigma"), List[Entry](), init_list(sigma_prod))
+@dataclass
+class TypeDecl:
+    name: Var
+    signature: Type
 
-unit_ctor = CtorDef.init_ctor_def(String("()"), List[Entry]())
-unit_entry = Entry.init_data(String("Unit"), List[Entry](), init_list(unit_ctor))
+    def entry_binding(self) -> bindings.Entry:
+        return bindings.Entry.init_decl(bindings.TypeDecl.init_type_decl(
+            self.name.name_binding(), Epsilon.rel, self.signature.binding()))
 
-false_ctor = CtorDef.init_ctor_def(String("False"), List[Entry]())
-true_ctor = CtorDef.init_ctor_def(String("True"), List[Entry]())
-bool_entry = \
-    Entry.init_data(String("Bool"), List[Entry](), init_list(false_ctor, true_ctor))
+@dataclass
+class Def:
+    name: Var
+    body: Term
 
-prelude_data_decls = [sigma_entry, unit_entry, bool_entry]
-empty_env = \
-    Env.init_env(init_list(*prelude_data_decls), Int(len(prelude_data_decls)), List[TypeDecl]())
+    def entry_binding(self) -> bindings.Entry:
+        return bindings.Entry.init_def(self.name.name_binding(), self.body.binding())
+
+type Entry = TypeDecl | Def | DataType
+
+def type_check(entries: list[Entry]):
+    entry_bindings = [entry.entry_binding() for entry in entries]
+    result = bindings.type_check(List[bindings.Entry](*entry_bindings))
+    if result.kind == Maybe.KIND_JUST:
+        raise Exception(result.get_just())

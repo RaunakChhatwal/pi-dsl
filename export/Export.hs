@@ -5,15 +5,18 @@ module Export where
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
 import Bindings (implStorable, alignOffsetUp, buildDeclOrder, sizeOf, alignment, exportFunction)
-import Syntax(Epsilon, Term, Type)
+import Syntax(Entry, Epsilon, Term, Type)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)
 import Data.Functor ((<&>))
 import Data.String.Interpolate (i)
 import PrettyPrint (ppr)
-import Environment (Env, Err, runTcMonad)
-import TypeCheck (inferType, checkType)
-import Control.Monad (join)
+import Environment (Env, Err, runTcMonad, TcMonad)
+import TypeCheck (checkType, inferType, tcEntry, HintOrCtx(..))
+import Control.Monad (join, foldM_, void)
+import qualified Environment as Env
+import Control.Monad.Trans (liftIO)
+import Data.List (intercalate)
 
 instance F.Storable Integer where
   alignment _ = alignment @Int
@@ -63,12 +66,13 @@ $(catMaybes <$> (mapM implStorable =<< buildDeclOrder ''Env))
 
 $(join $ exportFunction "ppr_term" <$> sequence [[t|Term|]] <*> [t|String|] <*> [| return . ppr |])
 
-$(join $ exportFunction "infer_type"
-    <$> sequence [[t|Env|], [t|Term|]]
-    <*> [t| Either String Type |]
-    <*> [|\env term -> runTcMonad env (inferType term)|])
+typeCheck :: [Entry] -> IO (Maybe String)
+typeCheck entries = either Just (const Nothing) <$> runTcMonad emptyEnv tcEntries where
+  tcEntries = foldr1 tcNextEntry (map tcEntry entries)
+  tcNextEntry curr next = curr >>= \case
+    AddHint hint -> Env.extendHints hint next
+    AddCtx decls -> Env.extendCtxsGlobal decls next
+  emptyEnv = Env.Env [] 0 []
 
-$(join $ exportFunction "check_type"
-    <$> sequence [[t|Env|], [t|Term|], [t|Type|]]
-    <*> [t| Maybe String |]
-    <*> [|\env term ty -> either Just (const Nothing) <$> runTcMonad env (checkType term ty)|])
+$(join $ exportFunction "type_check"
+    <$> sequence [[t| [Entry] |]] <*> [t| Maybe String |] <*> [|typeCheck|])
