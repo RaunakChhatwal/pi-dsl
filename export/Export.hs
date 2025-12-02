@@ -72,15 +72,8 @@ tcEntries entries = foldr1 tcNextEntry (map tcEntry entries) where
     AddHint hint -> Env.extendHints hint next
     AddCtx decls -> Env.extendCtxsGlobal decls next
 
-typeCheck :: [Entry] -> IO (Maybe String)
--- typeCheck entries = return $ either Just (const Nothing) $ runTcMonad $ tcEntries entries
-typeCheck entries = return $ runTcMonad $ tcEntries entries
-
--- traceTypeCheck :: [Entry] -> IO (Either String [Trace])
--- traceTypeCheck entries = undefined
-
 $(join $ exportFunction "type_check"
-  <$> sequence [[t| [Entry] |]] <*> [t| Maybe String |] <*> [|typeCheck|])
+  <$> sequence [[t| [Entry] |]] <*> [t| Maybe String |] <*> [| return . runTcMonad . tcEntries |])
 
 $(join $ exportFunction "trace_type_check"
     <$> sequence [[t| [Entry] |]]

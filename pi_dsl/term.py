@@ -2,7 +2,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, cast, Self
-from .base import *
+from .base import init_tuple, Int, List, String, Tuple
 from . import bindings
 from .bindings import Bind, CtorDef, Entry, Epsilon, Name, Pattern, TName, Telescope, TypeDecl
 
@@ -70,6 +70,21 @@ def args_to_telescope(args: list[Arg]) -> Telescope:
     return List[Entry](*telescope_entries)
 
 @dataclass
+class App(Term):
+    func: Term
+    arg: Rel[Term]
+
+    def binding(self) -> bindings.Term:
+        match self.arg:
+            case Irr(inner=raw_arg):
+                relevance = Epsilon.irr
+            case raw_arg:
+                relevance = Epsilon.rel
+
+        arg_binding = bindings.Arg.init_arg(relevance, raw_arg.binding())
+        return bindings.Term.init_app(self.func.binding(), arg_binding)
+
+@dataclass
 class Ctor(Term):
     name: str
     params: list[Arg]
@@ -125,7 +140,7 @@ class DataType(Term):
 
     def entry_binding(self) -> Entry:
         telescope = args_to_telescope(self.type_params)
-        ctor_defs = init_list(*[ctor.ctor_def() for ctor in self.ctors])
+        ctor_defs = List[CtorDef](*[ctor.ctor_def() for ctor in self.ctors])
         return bindings.Entry.init_data(String(self.name), telescope, ctor_defs)
 
 @dataclass
@@ -166,4 +181,4 @@ class Pi(Term):
         bind = Bind[TName, bindings.Type].init_b(var.name_binding(), self.body.binding())
         return bindings.Term.init_ty_pi(relevance, type_.binding(), bind)
 
-type TermUnion = Case | Ctor | DataType | Lam | Pi | Var
+type TermUnion = App | Case | Ctor | DataType | Lam | Pi | Var

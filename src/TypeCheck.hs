@@ -49,8 +49,7 @@ inferType a = traceM "inferType" [ppr a] ppr $ case a of
     case ty1' of 
       (TyPi {- SOLN EP -}ep1 {- STUBWITH -} tyA bnd) -> do
           unless (ep1 == argEp b) $ Env.err 
-            [DS "In application, expected", DD ep1, DS "argument but found", 
-                                            DD b, DS "instead." ]
+            [DS "In application, expected", DD ep1, DS "argument but found", DD b, DS "instead."]
           -- if the argument is Irrelevant, resurrect the context 
           (if ep1 == Irr then Env.extendCtx (Demote Rel) else id) $ checkType (unArg b) tyA 
           return (instantiate bnd (unArg b) )
@@ -61,49 +60,13 @@ inferType a = traceM "inferType" [ppr a] ppr $ case a of
     tcType tyA
     checkType a tyA
     return tyA
-  
-  -- Extensions to the core language
-  -- i-unit
-  TyUnit -> return TyType
-  LitUnit -> return TyUnit
-
-  -- i-bool
-  TyBool -> return TyType 
-
-  -- i-true/false
-  (LitBool _) -> return TyBool 
-
-  -- i-if
-  (If a b1 b2) -> do
-      checkType a TyBool
-      tyA <- inferType b1
-      checkType b2 tyA
-      return tyA 
-
-  -- i-sigma
-  (TySigma tyA bnd) -> do
-    (x, tyB) <- unbind bnd
-    tcType tyA
-    Env.extendCtx (mkDecl x tyA) $ tcType tyB
-    return TyType 
-  -- i-eq
-  (TyEq a b) -> do
-    aTy <- inferType a
-    checkType b aTy
-    return TyType 
 
   -- Type constructor application
   (TyCon c params) -> do
     (Telescope delta, _) <- Env.lookupTCon c
     unless (length params == length delta) $
-      Env.err
-        [ DS "Datatype constructor",
-          DD c,
-          DS $
-            "should have " ++ show (length delta)
-              ++ "parameters, but was given",
-          DD (length params)
-        ]
+      Env.err [ DS "Datatype constructor", DD c,
+          DS [i|should have #{length delta} parameters, but was given|], DD (length params) ]
     tcArgTele params delta
     return TyType
 
@@ -116,16 +79,9 @@ inferType a = traceM "inferType" [ppr a] ppr $ case a of
     case matches of
       [(tname, (Telescope [], CtorDef _ (Telescope deltai)))] -> do
         let numArgs = length deltai
-        unless (length args == numArgs) $
-          Env.err
-            [ DS "Constructor",
-              DS c,
-              DS "should have",
-              DD numArgs,
-              DS "data arguments, but was given",
-              DD (length args),
-              DS "arguments."
-            ]
+        unless (length args == numArgs) $ Env.err
+          [ DS "Constructor", DS c, DS "should have", DD numArgs, DS "data arguments,",
+            DS "but was given", DD (length args), DS "arguments." ]
         tcArgTele args deltai
         return $ TyCon tname []
       [_] ->
@@ -158,120 +114,29 @@ checkType tm ty = traceM "checkType" [ppr tm, ppr ty] (const "") $ do
         -- unbind the variables in the lambda expression and pi type
         (x, body, tyB) <- unbind2 bnd bnd2
 -- epsilons should match up
-        unless (ep1 == ep2) $ Env.err [DS "In function definition, expected", DD ep2, DS "parameter", DD x, 
-                                      DS "but found", DD ep1, DS "instead."] 
+        unless (ep1 == ep2) $ Env.err
+          [ DS "In function definition, expected", DD ep2, DS "parameter", DD x, 
+            DS "but found", DD ep1, DS "instead." ] 
         -- check the type of the body of the lambda expression
         Env.extendCtx (Decl (TypeDecl x ep1 tyA)) (checkType body tyB)
       _ -> Env.err [DS "Lambda expression should have a function type, not", DD ty']
 
     TrustMe -> return ()
-
-    -- Extensions to the core language
-    -- c-if
-    (If a b1 b2) -> do
-      checkType a TyBool
-      dtrue <- Equal.unify [] a (LitBool True)
-      dfalse <- Equal.unify [] a (LitBool False)
-      Env.extendCtxs dtrue $ checkType b1 ty'
-      Env.extendCtxs dfalse $ checkType b2 ty' 
-    -- c-prod
-    (Prod a b) -> do
-      case ty' of
-        (TySigma tyA bnd) -> do
-          (x, tyB) <- unbind bnd
-          checkType a tyA
-          Env.extendCtxs [mkDecl x tyA, Def x a] $ checkType b tyB
-        _ ->
-          Env.err
-            [ DS "Products must have Sigma Type",
-              DD ty,
-              DS "found instead"
-            ]
-    
-    -- c-letpair
-    (LetPair p bnd) -> do
-      ((x, y), body) <- Unbound.unbind bnd
-      pty <- inferType p
-      pty' <- Equal.whnf pty
-      case pty' of
-        TySigma tyA bnd' -> do
-          let tyB = instantiate bnd' (Var x)
-          decl <- Equal.unify [] p (Prod (Var x) (Var y))
-          Env.extendCtxs ([mkDecl x tyA, mkDecl y tyB] ++ decl) $
-              checkType body ty'
-        _ -> Env.err [DS "Scrutinee of LetPair must have Sigma type"]
-    
-    -- c-let
-    (Let a bnd) -> do
-      (x, b) <- unbind bnd
-      tyA <- inferType a 
-      Env.extendCtxs [mkDecl x tyA, Def x a] (checkType b ty') 
-    -- c-refl
-    Refl -> case ty' of 
-            (TyEq a b) -> Equal.equate a b
-            _ -> Env.err [DS "Refl annotated with invalid type", DD ty']
-    -- c-subst
-    (Subst a b) -> do
-      -- infer the type of the proof 'b'
-      tp <- inferType b
-      -- make sure that it is an equality between m and n
-      nf <- Equal.whnf tp
-      (m, n) <- case nf of 
-                  TyEq m n -> return (m,n)
-                  _ -> Env.err [DS "Subst requires an equality type, not", DD tp]
-      -- if either side is a variable, add a definition to the context
-      edecl <- Equal.unify [] m n
-      -- if proof is a variable, add a definition to the context
-      pdecl <- Equal.unify [] b Refl
-      Env.extendCtxs (edecl ++ pdecl) $ checkType a ty'
-    -- c-contra 
-    (Contra p) -> do
-      ty' <- inferType p
-      nf <- Equal.whnf ty'
-      (a, b) <- case nf of 
-                  TyEq m n -> return (m,n)
-                  _ -> Env.err [DS "Contra requires an equality type, not", DD ty']
-      a' <- Equal.whnf a
-      b' <- Equal.whnf b
-      case (a', b') of
-        
-        (DataCon da _, DataCon db _)
-          | da /= db ->
-            return ()
-        
-        (LitBool b1, LitBool b2)
-          | b1 /= b2 ->
-            return ()
-        (_, _) ->
-          Env.err
-            [ DS "I can't tell that",
-              DD a,
-              DS "and",
-              DD b,
-              DS "are contradictory"
-            ]
     
     -- c-data
     -- we know the expected type of the data constructor
     -- so look up its type in the context
-    (DataCon c args) -> do
+    (DataCon ctor args) -> do
       case ty' of
         (TyCon tname params) -> do
-          (Telescope delta, Telescope deltai) <- Env.lookupDCon c tname
+          (Telescope delta, Telescope deltai) <- Env.lookupDCon ctor tname
           let isDecl :: Entry -> Bool
               isDecl (Decl _) = True
               isDecl _ = False
           let numArgs = length (filter isDecl deltai)
-          unless (length args == numArgs) $
-            Env.err
-              [ DS "Constructor",
-                DS c,
-                DS "should have",
-                DD numArgs,
-                DS "data arguments, but was given",
-                DD (length args),
-                DS "arguments."
-              ]
+          unless (length args == numArgs) $ Env.err
+            [ DS "Constructor", DS ctor, DS "should have", DD numArgs, DS "data arguments,",
+              DS "but was given", DD (length args), DS "arguments." ]
           newTele <- substTele delta params deltai
           tcArgTele args newTele
         _ ->

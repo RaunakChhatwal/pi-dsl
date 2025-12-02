@@ -352,20 +352,10 @@ instance Display Term where
       else display a
   display TrustMe = do
     return $ PP.text "TRUSTME"
-  display TyUnit = return $ PP.text "Unit"
-  display LitUnit = return $ PP.text "()"
-  display TyBool = return $ PP.text "Bool"
-  display (LitBool b) = return $ if b then PP.text "True" else PP.text "False"
-  display (If a b c) = do
-    p <- ask prec
-    da <- withPrec 0 $ display a
-    db <- withPrec 0 $ display b
-    dc <- withPrec 0 $ display c
-    return $ parens (levelIf < p) $
-      PP.text "if" <+> da <+> PP.text "then" <+> db
-        <+> PP.text "else"
-        <+> dc
-  display (TySigma tyA bnd) =
+  display t
+    | Just i <- isNumeral t = display i
+  display (TyCon n [Arg Rel tyA, Arg Rel (Lam Rel bnd)])  | n == sigmaName =
+      -- display (TySigma a bnd)
     Unbound.lunbind bnd $ \(x, tyB) -> do
       if x `elem` toListOf Unbound.fv tyB then do
         dx <- display x
@@ -381,74 +371,6 @@ instance Display Term where
           dA <- withPrec levelSigma $ display tyA
           dB <- withPrec levelSigma $ display tyB
           return $ parens (levelSigma < p) (dA PP.<+> PP.text "*" PP.<+> dB)
-  display (Prod a b) = do
-    p <- ask prec
-    da <- withPrec levelProd $ display a
-    db <- withPrec levelProd $ display b
-    return $ parens (levelProd < p) (da PP.<> PP.text "," PP.<> db)
-  display (LetPair a bnd) = do
-    da <- display a
-    Unbound.lunbind bnd $ \((x, y), body) -> do
-      p <- ask prec
-      dx <- withPrec 0 $ display x
-      dy <- withPrec 0 $ display y
-      dbody <- withPrec 0 $ display body
-      return $
-        parens (levelLet < p) $
-        (PP.text "let"
-          <+> (PP.text "("
-          PP.<> dx
-          PP.<> PP.text ","
-          PP.<> dy
-          PP.<> PP.text ")")
-          <+> PP.text "="
-          <+> da
-          <+> PP.text "in")
-        $$ dbody
-  display (Let a bnd) = do
-    Unbound.lunbind bnd $ \(x, b) -> do
-      p <- ask prec
-      da <- display a
-      dx <- display x
-      db <- display b
-      return $
-        parens (levelLet < p) $
-        PP.sep
-          [ PP.text "let" <+> dx
-              <+> PP.text "="
-              <+> da
-              <+> PP.text "in",
-            db
-          ]
-
-  display (Subst a b) = do
-    p <- asks prec
-    da <- withPrec 0 $ display a
-    db <- withPrec 0 $ display b
-    return $
-      parens (levelPi < p) $
-      PP.fsep
-        [ PP.text "subst" <+> da,
-          PP.text "by" <+> db
-        ]
-  display (TyEq a b) = do
-    p <- ask prec
-    da <- withPrec (levelApp+1) $ display a
-    db <- withPrec (levelApp+1) $ display b
-    return $ PP.parens $ (da <+> PP.text "=" <+> db)
-  display Refl = do
-    return $ PP.text "Refl"
-  display (Contra ty) = do
-    p <- ask prec
-    dty <- display ty
-    return $ parens (levelPi < p) $ PP.text "contra" <+> dty
-  
-
-  display t
-    | Just i <- isNumeral t = display i
-  display (TyCon n [Arg Rel a,Arg Rel (Lam Rel bnd)]) 
-    | n == sigmaName = do
-      display (TySigma a bnd)
   display (TyCon n args) = do
     p <- ask prec
     dn <- display n

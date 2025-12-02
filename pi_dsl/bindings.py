@@ -156,7 +156,7 @@ class Pattern(TaggedUnion):
         return self.get_field(TName)
 
 class Term(TaggedUnion):
-    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     
     KIND_TY_TYPE = 0
     KIND_VAR = 1
@@ -165,29 +165,12 @@ class Term(TaggedUnion):
     KIND_TY_PI = 4
     KIND_ANN = 5
     KIND_TRUST_ME = 6
-    KIND_LET = 7
-    KIND_TY_UNIT = 8
-    KIND_LIT_UNIT = 9
-    KIND_TY_BOOL = 10
-    KIND_LIT_BOOL = 11
-    KIND_IF = 12
-    KIND_TY_SIGMA = 13
-    KIND_PROD = 14
-    KIND_LET_PAIR = 15
-    KIND_TY_EQ = 16
-    KIND_REFL = 17
-    KIND_SUBST = 18
-    KIND_CONTRA = 19
-    KIND_TY_CON = 20
-    KIND_DATA_CON = 21
-    KIND_CASE = 22
+    KIND_TY_CON = 7
+    KIND_DATA_CON = 8
+    KIND_CASE = 9
     
     ty_type: ClassVar[Self]
     trust_me: ClassVar[Self]
-    ty_unit: ClassVar[Self]
-    lit_unit: ClassVar[Self]
-    ty_bool: ClassVar[Self]
-    refl: ClassVar[Self]
     
     @classmethod
     def init_var(cls, value: TName):
@@ -230,78 +213,6 @@ class Term(TaggedUnion):
         return self.get_field(Tuple[Term, Type]).get()
     
     @classmethod
-    def init_let(cls, *values: *tuple[Term, Bind[TName, Term]]):
-        return cls(cls.KIND_LET, init_tuple(*values))
-    
-    def get_let(self) -> tuple[Term, Bind[TName, Term]]:
-        assert self.kind == self.KIND_LET
-        return self.get_field(Tuple[Term, Bind[TName, Term]]).get()
-    
-    @classmethod
-    def init_lit_bool(cls, value: Bool):
-        return cls(cls.KIND_LIT_BOOL, value)
-    
-    def get_lit_bool(self) -> Bool:
-        assert self.kind == self.KIND_LIT_BOOL
-        return self.get_field(Bool)
-    
-    @classmethod
-    def init_if(cls, *values: *tuple[Term, Term, Term]):
-        return cls(cls.KIND_IF, init_tuple(*values))
-    
-    def get_if(self) -> tuple[Term, Term, Term]:
-        assert self.kind == self.KIND_IF
-        return self.get_field(Tuple[Term, Term, Term]).get()
-    
-    @classmethod
-    def init_ty_sigma(cls, *values: *tuple[Term, Bind[TName, Term]]):
-        return cls(cls.KIND_TY_SIGMA, init_tuple(*values))
-    
-    def get_ty_sigma(self) -> tuple[Term, Bind[TName, Term]]:
-        assert self.kind == self.KIND_TY_SIGMA
-        return self.get_field(Tuple[Term, Bind[TName, Term]]).get()
-    
-    @classmethod
-    def init_prod(cls, *values: *tuple[Term, Term]):
-        return cls(cls.KIND_PROD, init_tuple(*values))
-    
-    def get_prod(self) -> tuple[Term, Term]:
-        assert self.kind == self.KIND_PROD
-        return self.get_field(Tuple[Term, Term]).get()
-    
-    @classmethod
-    def init_let_pair(cls, *values: *tuple[Term, Bind[Tuple[TName, TName], Term]]):
-        return cls(cls.KIND_LET_PAIR, init_tuple(*values))
-    
-    def get_let_pair(self) -> tuple[Term, Bind[Tuple[TName, TName], Term]]:
-        assert self.kind == self.KIND_LET_PAIR
-        return self.get_field(Tuple[Term, Bind[Tuple[TName, TName], Term]]).get()
-    
-    @classmethod
-    def init_ty_eq(cls, *values: *tuple[Term, Term]):
-        return cls(cls.KIND_TY_EQ, init_tuple(*values))
-    
-    def get_ty_eq(self) -> tuple[Term, Term]:
-        assert self.kind == self.KIND_TY_EQ
-        return self.get_field(Tuple[Term, Term]).get()
-    
-    @classmethod
-    def init_subst(cls, *values: *tuple[Term, Term]):
-        return cls(cls.KIND_SUBST, init_tuple(*values))
-    
-    def get_subst(self) -> tuple[Term, Term]:
-        assert self.kind == self.KIND_SUBST
-        return self.get_field(Tuple[Term, Term]).get()
-    
-    @classmethod
-    def init_contra(cls, value: Term):
-        return cls(cls.KIND_CONTRA, value)
-    
-    def get_contra(self) -> Term:
-        assert self.kind == self.KIND_CONTRA
-        return self.get_field(Term)
-    
-    @classmethod
     def init_ty_con(cls, *values: *tuple[TyConName, List[Arg]]):
         return cls(cls.KIND_TY_CON, init_tuple(*values))
     
@@ -327,10 +238,6 @@ class Term(TaggedUnion):
 
 Term.ty_type = Term(Term.KIND_TY_TYPE)
 Term.trust_me = Term(Term.KIND_TRUST_ME)
-Term.ty_unit = Term(Term.KIND_TY_UNIT)
-Term.lit_unit = Term(Term.KIND_LIT_UNIT)
-Term.ty_bool = Term(Term.KIND_TY_BOOL)
-Term.refl = Term(Term.KIND_REFL)
 
 class TypeDecl(TaggedUnion):
     kind: Literal[0]
