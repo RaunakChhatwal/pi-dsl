@@ -1,7 +1,7 @@
 {- pi-forall language -}
 
 -- | A Pretty Printer.
-module PrettyPrint (Disp (..), D (..), SourcePos, PP.Doc, PP.render, ppr, debug) where
+module PrettyPrint (Disp (..), D (..), SourcePos, PP.Doc, PP.render, ppr, debug, teleToPi) where
 
 import Control.Monad.Reader (MonadReader (ask, local), asks)
 import Data.Set qualified as S
@@ -26,7 +26,7 @@ import Syntax
 class Disp d where
   disp :: d -> Doc
   debugDisp :: d -> Doc
-  
+
   default disp :: (Display d) => d -> Doc
   disp d = display d initDI
 
@@ -122,17 +122,12 @@ instance Disp [Entry]
 
 instance Disp TypeDecl
 
-
-instance Disp Arg
-
-instance Disp [Arg]
-
-
 instance Disp Pattern
 
 instance Disp Match
 
-instance Disp Telescope
+instance Display Telescope where
+  display typeDecls = display $ unwords $ map ppr typeDecls
 
 instance Disp CtorDef
 
@@ -155,7 +150,6 @@ instance Display Entry where
     dt <- display term
     pure $ dn <+> PP.text "=" <+> dt
   display (Decl decl) = display decl
-  display (Demote ep) = return mempty 
   display (Data n params constructors) = do
     dn <- display n
     dp <- display params
@@ -168,26 +162,20 @@ instance Display Entry where
       )
       2
       (PP.vcat dc)
-  
+
+teleToPi :: Telescope -> Type -> Type
+teleToPi [] returnType = returnType
+teleToPi (TypeDecl paramName paramType : params) returnType =
+  TyPi paramType $ Unbound.bind paramName $ teleToPi params returnType
 
 instance Display CtorDef where
-  display (CtorDef c (Telescope [])) = do
-    pure $ PP.text c 
-  display (CtorDef c tele) = do
-    dc <- display c
-    dt <- display tele
-    pure $ dc <+> PP.text "of" <+> dt 
-
-
-instance Disp Epsilon where
-  disp Irr = PP.text "irrelevant"
-  disp Rel = PP.text "relevant"
-
-  debugDisp = disp
-
-
-
-
+  -- display (CtorDef c [] returnType) = do
+  --   pure $ PP.text c
+  display (CtorDef name params returnType) = foldl1 (<+>) <$>
+    sequence [display name, pure $ PP.text ":", display $ teleToPi params returnType]
+    -- dc <- display c
+    -- dt <- display tele
+    -- pure $ dc <+> PP.text "of" <+> dt
 
 
 -------------------------------------------------------------------------
@@ -225,17 +213,17 @@ instance Disp Bool where
   debugDisp = disp
 
 dispMaybe :: (t -> Doc) -> Maybe t -> Doc
-dispMaybe disp m = case m of 
+dispMaybe disp m = case m of
   (Just a) -> PP.text "Just" <+> disp a
-  Nothing -> PP.text "Nothing" 
-  
+  Nothing -> PP.text "Nothing"
+
 instance Disp a => Disp (Maybe a) where
   disp = dispMaybe disp
   debugDisp = dispMaybe debugDisp
 
 
 dispEither :: (Disp a, Disp b) => (forall a. Disp a => a -> Doc) -> Either a b -> Doc
-dispEither disp e = case e of 
+dispEither disp e = case e of
      (Left a) -> PP.text "Left" <+> disp a
      (Right a) -> PP.text "Right" <+> disp a
 
@@ -312,14 +300,11 @@ instance Display (Unbound.Name Term) where
     b <- ask showLongNames
     return (if b then debugDisp n else disp n)
 
-instance Display [Arg] where
-   display a = PP.sep <$> mapM display a
-
 
 instance Display Term where
   display TyType = return $ PP.text "Type"
   display (Var n) = display n
-  display a@(Lam _ b) = do
+  display a@(Lam b) = do
     n <- ask prec
     (binds, body) <- withPrec levelLam $ gatherBinders a
     return $ parens (levelLam < n) $ PP.hang (PP.text "\\" PP.<> PP.sep binds PP.<> PP.text ".") 2 body
@@ -328,7 +313,7 @@ instance Display Term where
     df <- withPrec levelApp (display f)
     dx <- withPrec (levelApp+1) (display x)
     return $ parens (levelApp < n) $ df <+> dx
-  display (TyPi ep a bnd) = do
+  display (TyPi a bnd) = do
     Unbound.lunbind bnd $ \(n, b) -> do
       p <- ask prec
       lhs <-
@@ -336,11 +321,8 @@ instance Display Term where
               then do
                 dn <- display n
                 da <- withPrec 0 (display a)
-                return $ mandatoryBindParens ep  (dn <+> PP.colon <+> da)
-              else do
-                case ep of
-                  Rel -> withPrec (levelArrow+1) (display a)
-                  Irr -> PP.brackets <$> (withPrec 0 (display a)) 
+                return $ PP.parens $ dn <+> PP.colon <+> da
+              else withPrec (levelArrow+1) (display a)
       db <- withPrec levelPi (display b)
       return $ parens (levelArrow < p) $ lhs <+> PP.text "->" <+> db
   display (Ann a b) = do
@@ -352,54 +334,9 @@ instance Display Term where
       else display a
   display TrustMe = do
     return $ PP.text "TRUSTME"
-  display t
-    | Just i <- isNumeral t = display i
-  display (TyCon n [Arg Rel tyA, Arg Rel (Lam Rel bnd)])  | n == sigmaName =
-      -- display (TySigma a bnd)
-    Unbound.lunbind bnd $ \(x, tyB) -> do
-      if x `elem` toListOf Unbound.fv tyB then do
-        dx <- display x
-        dA <- withPrec 0 $ display tyA
-        dB <- withPrec 0 $ display tyB
-        return $
-          PP.text "{" <+> dx <+> PP.text ":" <+> dA
-            <+> PP.text "|"
-            <+> dB
-            <+> PP.text "}"
-        else do
-          p <- ask prec
-          dA <- withPrec levelSigma $ display tyA
-          dB <- withPrec levelSigma $ display tyB
-          return $ parens (levelSigma < p) (dA PP.<+> PP.text "*" PP.<+> dB)
-  display (TyCon n args) = do
-    p <- ask prec
-    dn <- display n
-    dargs <- withPrec (levelApp+1) $ mapM display args
-    return $
-      parens (levelApp < p && not (null args)) (dn <+> PP.hsep dargs)
-  display (DataCon n args) = do
-    p <- ask prec
-    dn <- display n
-    dargs <- withPrec (levelApp+1) $ mapM display args
-    return $
-      parens (levelApp < p && not (null args)) (dn <+> PP.hsep dargs)
-  display (Case scrut alts) = do
-    p <- asks prec
-    dscrut <- withPrec 0 $ display scrut
-    dalts <- withPrec 0 $ mapM display alts
-    let top = PP.text "case" <+> dscrut <+> PP.text "of"
-    return $
-      parens (levelCase < p) $
-        if null dalts then top <+> PP.text "{ }" else top $$ PP.nest 2 (PP.vcat dalts)
-
-
-
-instance Display Arg where
-  display arg =
-    case argEp arg of
-      Irr -> PP.brackets <$> withPrec 0 (display (unArg arg))
-      Rel -> display (unArg arg)
-
+  display t | Just i <- isNumeral t = display i
+  display (TyCon typeName) = display typeName
+  display (DataCon name) = display name
 
 instance Display Match where
   display (Match bd) =
@@ -408,30 +345,15 @@ instance Display Match where
       dubd <- display ubd
       return $ PP.hang (dpat <+> PP.text "->") 2 dubd
 
+-- instance Display PatCtorArg where
+--   display (RelArg pat) = display pat
+--   display (IrrVar var) = bindParens Irr <$> display var
+
 instance Display Pattern where
-  display (PatCon c [])   = display c
-  display (PatCon c args) = do
-    dc <- display c
-    dargs <- mapM wrap args
-    return $ dc <+> PP.hsep dargs
-      where
-        wrap (a@(PatVar _),ep)    = bindParens ep <$> display a
-        wrap (a@(PatCon _ []),ep) = bindParens ep <$> display a
-        wrap (a@(PatCon _ _),ep)  = mandatoryBindParens ep <$> display a
-
-  display (PatVar x) = display x
-
-
-instance Display Telescope where
-  display (Telescope t) = do
-    dt <- mapM display t
-    pure $ PP.sep (map PP.parens dt)
-
-instance Display a => Display (a, Epsilon) where
-  display (t, ep) = bindParens ep <$> display t
-
-
-
+  display (PatVar var) = display var
+  display (PatCon ctor []) = display ctor
+  display (PatCon ctor args) = (<+>) <$> display ctor <*> argsDoc where
+    argsDoc = PP.hsep <$> mapM display args
 
 -------------------------------------------------------------------------
 
@@ -440,30 +362,14 @@ instance Display a => Display (a, Epsilon) where
 -------------------------------------------------------------------------
 
 gatherBinders :: Term -> DispInfo -> ([Doc], Doc)
-gatherBinders (Lam ep b) =
+gatherBinders (Lam b) =
   Unbound.lunbind b $ \(n, body) -> do
     dn <- display n
-    let db = bindParens ep  dn
     (rest, body') <- gatherBinders body
-    return (db : rest, body')
+    return (dn : rest, body')
 gatherBinders body = do
   db <- display body
   return ([], db)
-
-precBindParens :: Epsilon -> Bool -> Doc -> Doc
-precBindParens Rel b d = parens b d
-precBindParens Irr b d = PP.brackets d
-
--- | Add [] for irrelevant arguments, leave other arguments alone
-bindParens :: Epsilon -> Doc -> Doc
-bindParens Rel d = d
-bindParens Irr d = PP.brackets d
-
--- | Always add () or [], shape determined by epsilon
-mandatoryBindParens :: Epsilon -> Doc -> Doc
-mandatoryBindParens Rel d = PP.parens d
-mandatoryBindParens Irr d = PP.brackets d
-
 
 
 -------------------------------------------------------------------------
@@ -476,17 +382,7 @@ instance Unbound.LFresh ((->) DispInfo) where
   lfresh nm = do
     let s = Unbound.name2String nm
     di <- ask
-    return $
-      head
-        ( filter
-            (\x -> Unbound.AnyName x `S.notMember` dispAvoid di)
-            (map (Unbound.makeName s) [0 ..])
-        )
+    return $ head $
+      filter (\x -> Unbound.AnyName x `S.notMember` dispAvoid di) (map (Unbound.makeName s) [0 ..])
   getAvoids = asks dispAvoid
-  avoid names = local upd
-    where
-      upd di =
-        di
-          { dispAvoid =
-              S.fromList names `S.union` dispAvoid di
-          }
+  avoid names = local upd where upd di = di { dispAvoid = S.fromList names `S.union` dispAvoid di }

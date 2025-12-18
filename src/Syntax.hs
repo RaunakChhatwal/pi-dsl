@@ -47,64 +47,39 @@ data Term
   | -- | variable `x`
     Var TName
   | -- | abstraction  `\x. a`
-    Lam Epsilon (Unbound.Bind TName Term)
+    Lam (Unbound.Bind TName Term)
   | -- | application `a b`
-    App Term Arg
+    App Term Term
   | -- | function type   `(x : A) -> B`
-    TyPi Epsilon Type (Unbound.Bind TName Type)
+    TyPi Type (Unbound.Bind TName Type)
   | -- | annotated terms `( a : A )`
     Ann Term Type
   | -- | an axiom 'TRUSTME', inhabits all types
     TrustMe
   | -- | type constructors (fully applied)
-    TyCon TyConName [Arg]
+    TyCon TyConName
   | -- | term constructors (fully applied)
-    DataCon DataConName [Arg] 
-  | -- | case analysis  `case a of matches`
-    Case Term [Match]
-  
+    DataCon DataConName
   deriving (Show, Generic)
-
--- | An argument to a function
-data Arg = Arg {argEp :: Epsilon, unArg :: Term}
-  deriving (Show, Generic, Unbound.Alpha, Unbound.Subst Term)
-
--- | Epsilon annotates the stage of a variable
-data Epsilon
-  = Rel
-  | Irr
-  deriving
-    ( Eq,
-      Show,
-      Read,
-      Bounded,
-      Enum,
-      Ord,
-      Generic,
-      Unbound.Alpha,
-      Unbound.Subst Term
-    )
 
 -- | A 'Match' represents a case alternative
 newtype Match = Match (Unbound.Bind Pattern Term)
   deriving (Show, Generic, Typeable)
   deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
--- | The patterns of case expressions bind all variables
--- in their respective branches.
-data Pattern
-  = PatCon DataConName [(Pattern, Epsilon)]
-  | PatVar TName
+-- data PatCtorArg = RelArg Pattern | IrrVar TName
+--   deriving (Show, Eq, Generic, Unbound.Alpha, Unbound.Subst Term)
+
+data Pattern = PatVar TName | PatCon DataConName [Pattern]
   deriving (Show, Eq, Generic, Typeable, Unbound.Alpha, Unbound.Subst Term)
 
-
 -- | A type declaration 
-data TypeDecl = TypeDecl {declName :: TName , declEp :: Epsilon  , declType :: Type}
+data TypeDecl = TypeDecl {declName :: TName , declType :: Type}
   deriving (Show, Generic, Typeable, Unbound.Alpha, Unbound.Subst Term)
 
--- | Declare the type of a term
-mkDecl :: TName -> Type -> Entry
-mkDecl n ty = Decl (TypeDecl n Rel  ty)
+-- -- | Declare the type of a term
+-- mkDecl :: TName -> Type -> Entry
+-- mkDecl n ty = Decl (TypeDecl n ty)
 
 -- | Entries are the components of modules
 data Entry
@@ -113,8 +88,6 @@ data Entry
   | -- | The definition of a particular name 'x = a'
     -- must already have a type declaration in scope
     Def TName Term
-    -- | Adjust the context for relevance checking
-  | Demote Epsilon  
   | -- | Datatype definition (must be at the module level)
     Data TyConName Telescope [CtorDef]
   
@@ -140,7 +113,7 @@ data ConstructorNames = ConstructorNames
   deriving (Show, Eq, Ord, Generic, Typeable)
 
 -- | A Data constructor has a name and a telescope of arguments
-data CtorDef = CtorDef DataConName Telescope
+data CtorDef = CtorDef DataConName Telescope Type
   deriving (Show, Generic)
   deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
@@ -151,74 +124,24 @@ data CtorDef = CtorDef DataConName Telescope
 -- later in the list. 
 -- For example
 --     Delta = [ x:Type , y:x, y = w ]
-newtype Telescope = Telescope [Entry]
-  deriving (Show, Generic)
-  deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
+type Telescope = [TypeDecl]
+
+  -- deriving (Show, Generic)
+  -- deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
 -----------------------------------------
 -- Definitions related to datatypes
 
 -- | Is this the syntax of a literal (natural) number
 isNumeral :: Term -> Maybe Int
-isNumeral (DataCon c []) | c == "Zero" = Just 0
-isNumeral (DataCon c [Arg _ t]) | c == "Succ" =
-  do n <- isNumeral t; return (n + 1)
+isNumeral (DataCon "zero") = Just 0
+isNumeral (App (DataCon "succ") predTerm) | Just pred <- isNumeral predTerm = Just (pred + 1)
 isNumeral _ = Nothing
 
 -- | Is this pattern a variable
 isPatVar :: Pattern -> Bool
-isPatVar (PatVar _) = True
+isPatVar (PatVar {}) = True
 isPatVar _ = False
-
--- | built-in set of constructor names
-initialConstructorNames :: ConstructorNames
-initialConstructorNames = ConstructorNames initialTCNames initialDCNames
-
--- | prelude names for built-in datatypes
-sigmaName :: TyConName
-sigmaName = "Sigma"
-prodName :: DataConName
-prodName = "Prod"
-boolName :: TyConName
-boolName = "Bool"
-trueName :: DataConName
-trueName = "True"
-falseName :: DataConName
-falseName = "False"
-tyUnitName :: TyConName
-tyUnitName = "Unit"
-litUnitName :: DataConName
-litUnitName = "()"
-
-initialTCNames :: Set TyConName
-initialTCNames = Set.fromList [sigmaName, boolName, tyUnitName]
-initialDCNames :: Set DataConName
-initialDCNames = Set.fromList [prodName, trueName, falseName, litUnitName]
-
-
-preludeDataDecls :: [Entry]
-preludeDataDecls = 
-  [ Data sigmaName  sigmaTele      [prodConstructorDef]
-  , Data tyUnitName (Telescope []) [unitConstructorDef]
-  , Data boolName   (Telescope []) [falseConstructorDef, trueConstructorDef]
-  ]  where
-        -- boolean
-        trueConstructorDef = CtorDef trueName (Telescope [])
-        falseConstructorDef = CtorDef falseName (Telescope [])
-
-        -- unit
-        unitConstructorDef = CtorDef litUnitName (Telescope []) 
-
-        -- Sigma-type
-        sigmaTele = Telescope [declA, declB]
-        prodConstructorDef = CtorDef prodName (Telescope [declX, declY])
-        declA = mkDecl aName TyType
-        declB = mkDecl bName (TyPi Rel (Var aName) (Unbound.bind xName TyType))
-        declX = mkDecl xName (Var aName)
-        declY = mkDecl yName (App (Var bName) (Arg Rel (Var xName)))
-        aName = Unbound.string2Name "a"
-        bName = Unbound.string2Name "b"
-
 
 -----------------------------------------
 -- * Auxiliary functions on syntax
@@ -229,15 +152,6 @@ preludeDataDecls =
 strip :: Term -> Term
 strip (Ann tm _) = strip tm
 strip tm = tm
-
--- -- | Partial inverse of Pos
--- unPos :: Term -> Maybe SourcePos
--- unPos (Pos p _) = Just p
--- unPos _ = Nothing
-
--- -- | Tries to find a Pos inside a term, otherwise just gives up.
--- unPosFlaky :: Term -> SourcePos
--- unPosFlaky t = fromMaybe (newPos "unknown location" 0 0) (unPos t)
 
 
 
@@ -267,21 +181,18 @@ subst :: TName -> Term -> Term -> Term
 subst = Unbound.subst
 
 -- | in a binder `x.a` replace `x` with `b` 
-instantiate :: Unbound.Bind TName Term -> Term -> Term
-instantiate bnd a = Unbound.instantiate bnd [a]
+-- instantiate :: Unbound.Bind TName Term -> Term -> Term
+-- instantiate bnd a = Unbound.instantiate bnd [a]
 
--- | in a binder `x.a` replace `x` with a fresh name
-unbind :: (Unbound.Fresh m) => Unbound.Bind TName Term -> m (TName, Term)
-unbind = Unbound.unbind
+-- -- | in a binder `x.a` replace `x` with a fresh name
+-- unbind :: (Unbound.Fresh m) => Unbound.Bind TName Term -> m (TName, Term)
+-- unbind = Unbound.unbind
 
 -- | in binders `x.a1` and `x.a2` replace `x` with a fresh name in both terms
 unbind2 :: (Unbound.Fresh m) => Unbound.Bind TName Term -> Unbound.Bind TName Term -> m (TName, Term, Term)
-unbind2 b1 b2 = do 
-  o <- Unbound.unbind2 b1 b2
-  case o of 
-      Just (x,t,_,u) -> return (x,t,u)
-      Nothing -> error "impossible" 
-------------------
+unbind2 b1 b2 = Unbound.unbind2 b1 b2 >>= \case 
+  Just (x, t, _, u) -> return (x, t, u)
+  Nothing -> error "impossible" 
 
 -- * `Alpha` class instances
 
@@ -297,40 +208,6 @@ instance Unbound.Alpha Term where
   aeq' :: Unbound.AlphaCtx -> Term -> Term -> Bool
   aeq' ctx a b = (Unbound.gaeq ctx `on` from) (strip a) (strip b)
 
-
--- For example, all occurrences of annotations and source positions
--- are ignored by this definition.
-
--- '(Bool : Type)' is alpha-equivalent to 'Bool'
--- >>> aeq (Ann TyBool TyType) TyBool
-
--- '(Bool, Bool:Type)' is alpha-equivalent to (Bool, Bool)
--- >>> aeq (Prod TyBool (Ann TyBool TyType)) (Prod TyBool TyBool)
-
-
--- At the same time, the generic operation equates terms that differ only 
--- in the names of bound variables.
-
--- 'x'
-xName :: TName
-xName = Unbound.string2Name "x"
-
--- 'y'
-yName :: TName
-yName = Unbound.string2Name "y"
-
--- '\x -> x`
-idx :: Term
-idx = Lam Rel (Unbound.bind xName (Var xName))
-
--- '\y -> y`
-idy :: Term
-idy = Lam Rel (Unbound.bind yName (Var yName))
-
--- >>> aeq idx idy
-
-
-
 ---------------
 
 -- * Substitution
@@ -344,13 +221,6 @@ idy = Lam Rel (Unbound.bind yName (Var yName))
 instance Unbound.Subst Term Term where
   isvar (Var x) = Just (Unbound.SubstName x)
   isvar _ = Nothing
-
-
--- '(y : x) -> y'
-pi1 :: Term 
-pi1 = TyPi Rel (Var xName) (Unbound.bind yName (Var yName))
-
--- >>> Unbound.aeq (Unbound.subst xName TyBool pi1) pi2
 
 -----------------
 

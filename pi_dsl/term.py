@@ -1,13 +1,11 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, cast, Self
-from .base import init_tuple, Int, List, String, Tuple
+import functools
+from typing import cast, Self
+from .base import Int, List, String
 from . import bindings
-from .bindings import Bind, CtorDef, Entry, Epsilon, Name, Pattern, TName, Telescope, TypeDecl
-
-# def string_to_name(string: str) -> Name[Any]:
-#     return Name[Any].init_fn(String(string), Int(0))
+from .bindings import bind, CtorDef, Entry, Name, Telescope, TName, TypeDecl
 
 class Term(ABC):
     @abstractmethod
@@ -22,7 +20,26 @@ class Term(ABC):
         assert isinstance(term, cls)
         return term
 
+    def __call__(self, *args: Term) -> Term:
+        return functools.reduce(App, args, self)
+
 type Type = Term
+
+@dataclass
+class Ann(Term):
+    term: Term
+    hint: Type
+
+    def binding(self) -> bindings.Term:
+        return bindings.Term.init_ann(self.term.binding(), self.hint.binding())
+
+@dataclass
+class App(Term):
+    func: Term
+    arg: Term
+
+    def binding(self) -> bindings.Term:
+        return bindings.Term.init_app(self.func.binding(), self.arg.binding())
 
 @dataclass
 class Var(Term):
@@ -31,154 +48,91 @@ class Var(Term):
     def binding(self) -> bindings.Term:
         return bindings.Term.init_var(self.name_binding())
 
-    def name_binding(self) -> Name[Any]:
-        return Name[Any].init_fn(String(self.name), Int(0))
+    def name_binding(self) -> TName:
+        return Name[bindings.Term].init_fn(String(self.name), Int(0))
 
 hole = Var("_")
 
-# Irrelevance marker
-class Irr[T]:
-    def __init__(self, inner: T):
-        self.inner = inner
+type Param = Type | tuple[Var, Type]
 
-    def get(self) -> T:
-        return self.inner
+def raw_param(param: Param) -> tuple[Var, Term]:
+    match param:
+        case Term() as type_:
+            return (hole, type_)
+        case (var, type_):
+            return (var, type_)
 
-# Wraps types that are either runtime relevant or irrelevant
-type Rel[T] = T | Irr[T]
-
-type Arg = Rel[Term | tuple[Var, Term]]
-
-def args_to_telescope(args: list[Arg]) -> Telescope:
-    telescope_entries: list[Entry] = []
-    for arg in args:
-        match arg:
-            case Irr(inner=raw_arg):
-                relevance = Epsilon.irr
-            case raw_arg:
-                relevance = Epsilon.rel
-
-        match raw_arg:
-            case Term() as type_:
-                var = hole
-            case (var, type_):
-                pass
-
-        telescope_entries.append(Entry.init_decl(TypeDecl.init_type_decl(
-            var.name_binding(), relevance, type_.binding())))
-
-    return List[Entry](*telescope_entries)
-
-@dataclass
-class App(Term):
-    func: Term
-    arg: Rel[Term]
-
-    def binding(self) -> bindings.Term:
-        match self.arg:
-            case Irr(inner=raw_arg):
-                relevance = Epsilon.irr
-            case raw_arg:
-                relevance = Epsilon.rel
-
-        arg_binding = bindings.Arg.init_arg(relevance, raw_arg.binding())
-        return bindings.Term.init_app(self.func.binding(), arg_binding)
+def params_binding(params: list[Param]) -> Telescope:
+    bindings = [TypeDecl.init_type_decl(var.name_binding(), type_.binding())
+        for (var, type_) in map(raw_param, params)]
+    return List[TypeDecl](*bindings)
 
 @dataclass
 class Ctor(Term):
     name: str
-    params: list[Arg]
+    params: list[Param]
+    returnType: Type
 
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_data_con(String(self.name), List[bindings.Arg]())
+        return bindings.Term.init_data_con(String(self.name))
 
     def ctor_def(self) -> CtorDef:
-        return CtorDef.init_ctor_def(String(self.name), args_to_telescope(self.params))
-
-type Pat = Rel[Var | Ctor | tuple[Ctor, list[Pat]]]
-
-def pat_binding(pat: Pat) -> Pattern:
-    match pat:
-        case Irr():
-            raise Exception("Top level pattern mustn't be implicit")
-        case Var():
-            return Pattern.init_pat_var(pat.name_binding())
-        case (ctor, arg_pats):
-            pass
-        case ctor:
-            arg_pats = []
-
-    arg_pat_bindings: list[Tuple[Pattern, Epsilon]] = []
-    for arg_pat in arg_pats:
-        match arg_pat:
-            case Irr(inner=raw_pat):
-                arg_pat_bindings.append(init_tuple(pat_binding(raw_pat), Epsilon.irr))
-            case _:
-                arg_pat_bindings.append(init_tuple(pat_binding(arg_pat), Epsilon.rel))
-    return Pattern.init_pat_con(String(ctor.name), List[Tuple[Pattern, Epsilon]](*arg_pat_bindings))
-
-@dataclass
-class Case(Term):
-    case_expr: Term
-    match_stmts: list[tuple[Pat, Term]]
-
-    def binding(self) -> bindings.Term:
-        match_binds: list[Bind[Pattern, bindings.Term]] = []
-        for (pat, body) in self.match_stmts:
-           match_binds.append(Bind[Pattern, bindings.Term].init_b(pat_binding(pat), body.binding()))
-        return bindings.Term.init_case(self.case_expr.binding(),
-            List[Bind[Pattern, bindings.Term]](*match_binds))
+        return CtorDef.init_ctor_def(
+            String(self.name), params_binding(self.params), self.returnType.binding())
 
 @dataclass
 class DataType(Term):
     name: str
-    type_params: list[Arg]
+    type_params: list[Param]
     ctors: list[Ctor]
 
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_ty_con(String(self.name), List[bindings.Arg]())
+        return bindings.Term.init_ty_con(String(self.name))
 
     def entry_binding(self) -> Entry:
-        telescope = args_to_telescope(self.type_params)
         ctor_defs = List[CtorDef](*[ctor.ctor_def() for ctor in self.ctors])
-        return bindings.Entry.init_data(String(self.name), telescope, ctor_defs)
+        return bindings.Entry.init_data(
+            String(self.name), params_binding(self.type_params), ctor_defs)
 
 @dataclass
 class Lam(Term):
-    param: Rel[Var]
+    param_names: Var | list[Var]
     body: Term
 
     def binding(self) -> bindings.Term:
-        match self.param:
-            case Var():
-                param_name = self.param.name_binding()
-                epsilon = Epsilon.rel
-            case Irr(inner=param):
-                param_name = param.name_binding()
-                epsilon = Epsilon.irr
+        match self.param_names:
+            case list() as param_names:
+                pass
+            case param_name:
+                param_names = [param_name]
 
-        bind = Bind[TName, bindings.Term].init_b(param_name, self.body.binding())
-        return bindings.Term.init_lam(epsilon, bind)
+        lam_binding = self.body.binding()
+        for param_name in reversed(param_names):
+            lam_binding = bindings.Term.init_lam(bind(param_name.name_binding(), lam_binding))
+        return lam_binding
 
 @dataclass
 class Pi(Term):
-    input_type: Rel[Type | tuple[Var, Type]]
-    body: Type
+    params: Param | list[Param]
+    return_type: Type
 
     def binding(self) -> bindings.Term:
-        match self.input_type:
-            case Irr(inner=raw_input):
-                relevance = Epsilon.irr
-            case raw_input:
-                relevance = Epsilon.rel
-
-        match raw_input:
-            case Term() as type_:
-                var = hole
-            case (var, type_):
+        match self.params:
+            case list() as params:
                 pass
+            case param:
+                params = [param]
 
-        bind = Bind[TName, bindings.Type].init_b(var.name_binding(), self.body.binding())
-        return bindings.Term.init_ty_pi(relevance, type_.binding(), bind)
+        pi_binding = self.return_type.binding()
+        for (var, type_) in map(raw_param, reversed(params)):
+            pi_binding = bindings.Term.init_ty_pi(
+                type_.binding(), bind(var.name_binding(), pi_binding))
+        return pi_binding
 
-type TermUnion = App | Case | Ctor | DataType | Lam | Pi | Var
+class UniverseSingleton(Term):
+    def binding(self) -> bindings.Term:
+        return bindings.Term.ty_type
+
+Universe = UniverseSingleton()
+
+type TermUnion = Ann | App | Ctor | DataType | Lam | Pi | Var | UniverseSingleton

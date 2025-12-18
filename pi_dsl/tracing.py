@@ -66,4 +66,4 @@ def trace_type_check(entries: list[Entry]) -> tuple[Optional[str], list[TraceTre
         case Maybe.KIND_NOTHING:
             return (None, traces)
         case Maybe.KIND_JUST:
-            return (str(error), traces)
+            return (str(error.get_just()), traces)

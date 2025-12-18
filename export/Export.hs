@@ -5,7 +5,7 @@ module Export where
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
 import Bindings (implStorable, alignOffsetUp, buildDeclOrder, sizeOf, alignment, exportFunction)
-import Syntax(Entry, Epsilon, Term, Type)
+import Syntax(Entry, Term, TName)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)
 import Data.Functor ((<&>))
@@ -63,6 +63,11 @@ instance F.Storable a => F.Storable [a] where
 
 $(mapM (fmap fromJust . implStorable) [''Maybe, ''Either, ''Trace])
 $(catMaybes <$> (mapM implStorable =<< buildDeclOrder ''Env))
+
+$(join $ exportFunction "bind"
+  <$> sequence [[t|TName|], [t|Term|]]
+  <*> [t|Unbound.Bind TName Term|]
+  <*> [| \var body -> return (Unbound.bind var body) |])
 
 $(join $ exportFunction "ppr_term" <$> sequence [[t|Term|]] <*> [t|String|] <*> [| return . ppr |])
 

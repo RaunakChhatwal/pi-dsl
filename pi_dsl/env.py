@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from .base import *
 from . import bindings
-from .bindings import Epsilon, Maybe
+from .bindings import Maybe
 from .term import DataType, Term, Type, Var
 
 @dataclass
@@ -10,8 +10,8 @@ class TypeDecl:
     signature: Type
 
     def entry_binding(self) -> bindings.Entry:
-        return bindings.Entry.init_decl(bindings.TypeDecl.init_type_decl(
-            self.name.name_binding(), Epsilon.rel, self.signature.binding()))
+        return bindings.Entry.init_decl(
+            bindings.TypeDecl.init_type_decl(self.name.name_binding(), self.signature.binding()))
 
 @dataclass
 class Def:

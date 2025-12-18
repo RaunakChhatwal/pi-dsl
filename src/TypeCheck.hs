@@ -1,292 +1,86 @@
-{- pi-forall -}
-
--- | The main routines for type-checking
-{-# HLINT ignore "Use forM_" #-}
-module TypeCheck (inferType, checkType, tcEntry, HintOrCtx(..)) where
+module TypeCheck where
 
 import Control.Monad.Except
-import Control.Monad (unless, foldM)
-import Control.Monad.IO.Class (liftIO)
-import Data.List (nub, intercalate)
-
-import Data.Maybe ( catMaybes )
-
+import Control.Monad (forM_)
+import Data.List (intercalate)
+import Data.Maybe (catMaybes)
 import Environment (TcMonad, traceM)
 import Environment qualified as Env
 import Equal qualified
-import PrettyPrint (D(DS, DD), Disp (disp), debug, ppr, debugDisp)
+import PrettyPrint (D(DS, DD), Disp (disp), debug, ppr, debugDisp, teleToPi)
 import Syntax
-
 import Text.PrettyPrint.HughesPJ (($$), render)
-
 import Unbound.Generics.LocallyNameless qualified as Unbound
-import Unbound.Generics.LocallyNameless.Unsafe (unsafeUnbind)
 import Data.String.Interpolate (i)
 
--- | Infer/synthesize the type of a term
-inferType :: Term -> TcMonad Type
-inferType a = traceM "inferType" [ppr a] ppr $ case a of
-  -- i-var
-  (Var x) -> do
-    decl <- Env.lookupTy x     -- make sure the variable is accessible
-    Env.checkStage (declEp decl) 
-    return (declType decl)
+betaReduceTyPi :: (Type, Unbound.Bind TName Type) -> Term -> TcMonad Type
+betaReduceTyPi (paramType, returnType) arg = do
+  checkType arg paramType
+  return $ Unbound.instantiate returnType [arg]
 
-  -- i-type
+-- Infer/synthesize the type of a term
+inferType :: Term -> TcMonad Type
+inferType term = traceM "inferType" [ppr term] ppr $ case term of
+  Var x -> declType <$> Env.lookupTy x
+
   TyType -> return TyType
 
-  -- i-pi
-  (TyPi ep tyA bnd) -> do
-    (x, tyB) <- unbind bnd
-    tcType tyA
-    Env.extendCtx (Decl (TypeDecl x ep tyA)) (tcType tyB)
+  TyPi tyA bnd -> do
+    (x, tyB) <- Unbound.unbind bnd
+    checkType tyA TyType
+    Env.extendCtx (Decl (TypeDecl x tyA)) (checkType tyB TyType)
     return TyType
 
-  -- i-app
-  (App a b) -> do
-    ty1 <- inferType a 
-    ty1' <- Equal.whnf ty1 
-    case ty1' of 
-      (TyPi {- SOLN EP -}ep1 {- STUBWITH -} tyA bnd) -> do
-          unless (ep1 == argEp b) $ Env.err 
-            [DS "In application, expected", DD ep1, DS "argument but found", DD b, DS "instead."]
-          -- if the argument is Irrelevant, resurrect the context 
-          (if ep1 == Irr then Env.extendCtx (Demote Rel) else id) $ checkType (unArg b) tyA 
-          return (instantiate bnd (unArg b) )
-      _ -> Env.err [DS "Expected a function type but found ", DD ty1]
+  App func arg -> do
+    funcType <- inferType func
+    Equal.whnf funcType >>= \case
+      TyPi paramType returnType -> betaReduceTyPi (paramType, returnType) arg
 
-  -- i-ann
-  (Ann a tyA) -> do
-    tcType tyA
+      typeCtor@(TyCon _) -> inferType typeCtor >>= \case
+        TyType -> undefined -- TODO: throw error message
+        TyPi paramType returnType -> betaReduceTyPi (paramType, returnType) arg
+        _ -> undefined
+
+      _ -> Env.err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
+
+  Ann a tyA -> do
+    checkType tyA TyType
     checkType a tyA
     return tyA
 
   -- Type constructor application
-  (TyCon c params) -> do
-    (Telescope delta, _) <- Env.lookupTCon c
-    unless (length params == length delta) $
-      Env.err [ DS "Datatype constructor", DD c,
-          DS [i|should have #{length delta} parameters, but was given|], DD (length params) ]
-    tcArgTele params delta
-    return TyType
+  TyCon typeName -> do
+    (typeParams, _) <- Env.lookupTCon typeName
+    return $ teleToPi typeParams TyType
 
   -- Data constructor application
-  -- we don't know the expected type, so see if there
-  -- is only one datacon of that name that takes no
-  -- parameters
-  (DataCon c args) -> do
-    matches <- Env.lookupDConAll c
-    case matches of
-      [(tname, (Telescope [], CtorDef _ (Telescope deltai)))] -> do
-        let numArgs = length deltai
-        unless (length args == numArgs) $ Env.err
-          [ DS "Constructor", DS c, DS "should have", DD numArgs, DS "data arguments,",
-            DS "but was given", DD (length args), DS "arguments." ]
-        tcArgTele args deltai
-        return $ TyCon tname []
-      [_] ->
-        Env.err
-          [ DS "Cannot infer the parameters to data constructors.",
-            DS "Add an annotation."
-          ]
-      _ -> Env.err [DS "Ambiguous data constructor", DS c] 
+  -- we don't know the expected type
+  -- so see if there is only one datacon of that name that takes no parameters
+  DataCon ctorName -> Env.lookupDConAll ctorName >>= \case
+    [(_, (_, CtorDef _ ctorParams returnType))] -> return $ teleToPi ctorParams returnType
+    _ -> Env.err [DS "Ambiguous data constructor", DS ctorName]
 
-  -- cannot synthesize the type of the term
-  _ -> 
-    Env.err [DS "Must have a type annotation for", DD a] 
+  _ -> Env.err [DS "Need a type annotation for", DD term]
 
-
--------------------------------------------------------------------------
-
--- | Make sure that the term is a "type" (i.e. that it has type 'Type')
-tcType :: Term -> TcMonad ()
-tcType tm = Env.withStage Irr $  checkType tm TyType
-
--------------------------------------------------------------------------
--- | Check that the given term has the expected type
+-- Check that the given term has the expected type
 checkType :: Term -> Type -> TcMonad ()
 checkType tm ty = traceM "checkType" [ppr tm, ppr ty] (const "") $ do
   ty' <- Equal.whnf ty 
   case tm of 
     -- c-lam: check the type of a function
-    (Lam ep1  bnd) -> case ty' of
-      (TyPi ep2 tyA bnd2) -> do
+    Lam bnd -> case ty' of
+      TyPi tyA bnd2 -> do
         -- unbind the variables in the lambda expression and pi type
         (x, body, tyB) <- unbind2 bnd bnd2
--- epsilons should match up
-        unless (ep1 == ep2) $ Env.err
-          [ DS "In function definition, expected", DD ep2, DS "parameter", DD x, 
-            DS "but found", DD ep1, DS "instead." ] 
         -- check the type of the body of the lambda expression
-        Env.extendCtx (Decl (TypeDecl x ep1 tyA)) (checkType body tyB)
+        Env.extendCtx (Decl (TypeDecl x tyA)) (checkType body tyB)
       _ -> Env.err [DS "Lambda expression should have a function type, not", DD ty']
 
     TrustMe -> return ()
-    
-    -- c-data
-    -- we know the expected type of the data constructor
-    -- so look up its type in the context
-    (DataCon ctor args) -> do
-      case ty' of
-        (TyCon tname params) -> do
-          (Telescope delta, Telescope deltai) <- Env.lookupDCon ctor tname
-          let isDecl :: Entry -> Bool
-              isDecl (Decl _) = True
-              isDecl _ = False
-          let numArgs = length (filter isDecl deltai)
-          unless (length args == numArgs) $ Env.err
-            [ DS "Constructor", DS ctor, DS "should have", DD numArgs, DS "data arguments,",
-              DS "but was given", DD (length args), DS "arguments." ]
-          newTele <- substTele delta params deltai
-          tcArgTele args newTele
-        _ ->
-          Env.err [DS "Unexpected type", DD ty', DS "for data constructor", DD tm]
 
-    (Case scrut alts) -> do
-      sty <- inferType scrut
-      (c, args) <- Equal.ensureTCon sty
-      scrut' <- Equal.whnf scrut
-      let checkAlt (Match bnd) = do
-            (pat, body) <- Unbound.unbind bnd
-            -- add variables from pattern to context
-            -- could fail if branch is in-accessible
-            decls <- declarePat pat Rel (TyCon c args)
-            -- add defs to the contents from scrut = pat
-            -- could fail if branch is in-accessible
-            decls' <- Equal.unify [] scrut' (pat2Term pat)
-            Env.extendCtxs (decls ++ decls') $ checkType body ty'
-
-            return ()
-      let pats = map (\(Match bnd) -> fst (unsafeUnbind bnd)) alts
-      mapM_ checkAlt alts
-      exhaustivityCheck scrut' sty pats
-    
-
-
-    -- c-infer
     _ -> do
       tyA <- inferType tm
       Equal.equate tyA ty'
-    
-
----------------------------------------------------------------------
--- helper functions for datatypes
-
--- | type check a list of data constructor arguments against a telescope
-tcArgTele :: [Arg] -> [Entry] -> TcMonad ()
-tcArgTele [] [] = return ()
-tcArgTele args (Def x ty : tele) = do
-  -- ensure that the equality is provable at this point
-  Equal.equate (Var x) ty
-  tcArgTele args tele
-tcArgTele (Arg ep1 tm : terms) (Decl (TypeDecl x ep2 ty) : tele) 
-  | ep1 == ep2 = do
-      Env.withStage ep1 $ checkType tm ty
-      tele' <- doSubst [(x, tm)] tele
-      tcArgTele terms tele'
-  | otherwise =
-  Env.err
-    [ DD ep1,
-      DS "argument provided when",
-      DD ep2,
-      DS "argument was expected"
-    ]
-tcArgTele [] _ =
-  Env.err [DD "Too few arguments provided."]
-tcArgTele _ [] =
-  Env.err [DD "Too many arguments provided."]
-tcArgTele _  tele = 
-  Env.err [DS "Invalid telescope", DD tele]
-
--- | Substitute a list of terms for the variables bound in a telescope
--- This is used to instantiate the parameters of a data constructor
--- to find the types of its arguments.
--- The first argument should only contain 'Rel' type declarations.
-substTele :: [Entry] -> [Arg] -> [Entry] -> TcMonad [Entry]
-substTele tele args = doSubst (mkSubst tele (map unArg args))
-  where
-    mkSubst [] [] = []
-    mkSubst (Decl (TypeDecl x Rel _) : tele') (tm : tms) =
-      (x, tm) : mkSubst tele' tms
-    mkSubst _ _ = error "Internal error: substTele given illegal arguments"
-
-
-
--- Propagate the given substitution through the telescope, potentially
--- reworking the constraints
-doSubst :: [(TName, Term)] -> [Entry] -> TcMonad [Entry]
-doSubst ss [] = return []
-doSubst ss (Def x ty : tele') = do
-  let tx' = Unbound.substs ss (Var x)
-  let ty' = Unbound.substs ss ty
-  decls1 <- Equal.unify [] tx' ty'
-  decls2 <- Env.extendCtxs decls1 (doSubst ss tele')
-  return $ decls1 ++ decls2
-doSubst ss (Decl decl : tele') = do
-  tynf <- Equal.whnf (Unbound.substs ss (declType decl))
-  let decl' = decl{declType = tynf}
-  tele'' <- doSubst ss tele'
-  return $ Decl decl' : tele''
-doSubst _ tele = 
-  Env.err [DS "Invalid telescope", DD tele]
-
------------------------------------------------------------
-
--- | Create a binding for each of the variables in the pattern
-declarePat :: Pattern -> Epsilon -> Type -> TcMonad [Entry]
-declarePat (PatVar x)       ep ty  = return [Decl (TypeDecl x ep ty)]
-declarePat (PatCon dc pats) Rel ty = do 
-  (tc,params) <- Equal.ensureTCon ty
-  (Telescope delta, Telescope deltai) <- Env.lookupDCon dc tc
-  tele <- substTele delta params deltai
-  declarePats dc pats tele
-declarePat pat Irr _ty =
-  Env.err [DS "Cannot pattern match irrelevant arguments in pattern", DD pat]
-
--- | Given a list of pattern arguments and a telescope, create a binding for 
--- each of the variables in the pattern, 
-declarePats :: DataConName -> [(Pattern, Epsilon)] -> [Entry] -> TcMonad [Entry]
-declarePats dc pats (Def x ty : tele) = do
-  let ds1 = [Def x ty]
-  ds2 <- Env.extendCtxs ds1 $ declarePats dc pats tele
-  return (ds1 ++ ds2)
-declarePats dc ((pat, _) : pats) (Decl (TypeDecl x ep ty) : tele) = do
-  ds1 <- declarePat pat ep ty
-  let tm = pat2Term pat
-  tele' <- doSubst [(x,tm)] tele
-  ds2 <- Env.extendCtxs ds1 $ declarePats dc pats tele'
-  return (ds1 ++ ds2)
-declarePats dc []   [] = return []
-declarePats dc []    _ = Env.err [DS "Not enough patterns in match for data constructor", DD dc]
-declarePats dc pats [] = Env.err [DS "Too many patterns in match for data constructor", DD dc]
-declarePats dc _    _ = Env.err [DS "Invalid telescope", DD dc]
-
--- | Convert a pattern to a term 
-pat2Term :: Pattern ->  Term
-pat2Term (PatVar x) = Var x
-pat2Term (PatCon dc pats) = DataCon dc (pats2Terms pats) 
-  where
-    pats2Terms :: [(Pattern, Epsilon)] -> [Arg]
-    pats2Terms [] = []
-    pats2Terms ((p, ep) : ps) = Arg ep t : ts where
-      t = pat2Term p 
-      ts = pats2Terms ps
-       
-
--- | Check all of the types contained within a telescope
-tcTypeTele :: [Entry] -> TcMonad ()
-tcTypeTele [] = return ()
-tcTypeTele (Def x tm : tl) = do
-  ty1 <- Env.withStage Irr $ inferType (Var x)
-  Env.withStage Irr $ checkType tm ty1
-  let decls = [Def x tm] 
-  Env.extendCtxs decls $ tcTypeTele tl
-tcTypeTele (Decl decl : tl) = do
-  tcType (declType decl)
-  Env.extendCtx (Decl decl) $ tcTypeTele tl
-tcTypeTele tele = 
-  Env.err [DS "Invalid telescope: ", DD tele]
-
 
 -- | The Env-delta returned when type-checking a top-level Entry.
 data HintOrCtx
@@ -310,40 +104,27 @@ tcEntry entry = traceM "tcEntry" [ppr entry] ppr $ case entry of
         case lkup of
           Nothing -> do
             ty <- inferType term
-            return $ AddCtx [Decl (TypeDecl n Rel ty), Def n term]
+            return $ AddCtx [Decl (TypeDecl n ty), Def n term]
           Just decl -> let
             handler (Env.Err msg) = throwError $ Env.Err (msg $$ msg')
             msg' = disp [ DS "When checking the term", DD term, DS "against the type", DD decl ]
             in do
-              Env.extendCtx (Decl decl) $ checkType term (declType decl) `catchError` handler
+              -- Env.extendCtx (Decl decl) $ checkType term (declType decl) `catchError` handler
+              checkType term (declType decl) `catchError` handler
               return $ AddCtx [Decl decl, Def n term]
       die term' = Env.err
         [DS "Multiple definitions of", DD n, DS "Previous definition was", DD term']
   Decl decl -> do
     duplicateTypeBindingCheck decl
-    tcType (declType decl)
+    checkType (declType decl) TyType
     return $ AddHint decl
-  Demote ep -> return (AddCtx [Demote ep])
-
-
--- rule Entry_data
-  Data t (Telescope delta) cs -> do
-    -- Check that the telescope for the datatype definition is well-formed
-    edelta <- tcTypeTele delta
-    ---- check that the telescope provided
-    ---  for each data constructor is wellfomed, and elaborate them
-    let elabConstructorDef defn@(CtorDef d (Telescope tele)) =
-          Env.extendCtx (Data t (Telescope delta) []) $
-            Env.extendCtxTele delta $ do
-              etele <- tcTypeTele tele
-              return (CtorDef d (Telescope tele))
-    ecs <- mapM elabConstructorDef cs
-    -- Implicitly, we expect the constructors to actually be different...
-    let cnames = map (\(CtorDef c _) -> c) cs
-    unless (length cnames == length (nub cnames)) $
-      Env.err [DS "Datatype definition", DD t, DS "contains duplicated constructors"]
-    -- finally, add the datatype to the env and perform action m
-    return $ AddCtx [Data t (Telescope delta) ecs]
+  dataDecl@(Data typeName typeParams ctors) -> do
+    checkType (teleToPi typeParams TyType) TyType
+    -- TODO: check strict positivity, returnType is self
+    forM_ ctors $ \(CtorDef name params returnType) ->
+      Env.extendCtx (Data typeName typeParams []) $ checkType (teleToPi params returnType) TyType
+    -- TODO: assert unique ctor name
+    return $ AddCtx [dataDecl]
 
 
 -- | Make sure that we don't have the same name twice in the
@@ -358,116 +139,17 @@ duplicateTypeBindingCheck decl = do
   case catMaybes [l, l'] of
     [] -> return ()
     -- We already have a type in the environment so fail.
-    decl' : _ -> Env.err [
-        DS "Duplicate type declaration",
-        DD decl,
-        DS "Previous was",
-        DD decl'
-      ]
-
------------------------------------------------------------
--- Checking that pattern matching is exhaustive
------------------------------------------------------------
-
--- | Given a particular type and a list of patterns, make
--- sure that the patterns cover all potential cases for that
--- type.
--- If the list of patterns starts with a variable, then it doesn't
--- matter what the type is, the variable is exhaustive. (This code
--- does not report unreachable patterns.)
--- Otherwise, the scrutinee type must be a type constructor, so the
--- code looks up the data constructors for that type and makes sure that
--- there are patterns for each one.
-exhaustivityCheck :: Term -> Type -> [Pattern] -> TcMonad ()
-exhaustivityCheck scrut ty (PatVar x : _) = return ()
-exhaustivityCheck scrut ty pats = do
-  (tcon, tys) <- Equal.ensureTCon ty
-  (Telescope delta, mdefs) <- Env.lookupTCon tcon
-  case mdefs of
-    Just datacons -> do
-      loop pats datacons
-      where
-        loop [] [] = return ()
-        loop [] dcons = do
-          l <- checkImpossible dcons
-          if null l
-            then return ()
-            else Env.err $ DS "Missing case for" : map DD l
-        loop (PatVar x : _) dcons = return ()
-        loop (PatCon dc args : pats') dcons = do
-          (CtorDef _ (Telescope tele), dcons') <- removeDCon dc dcons
-          tele' <- substTele delta tys tele
-          let (aargs, pats'') = relatedPats dc pats'
-          -- check the arguments of the data constructor
-          checkSubPats dc tele' (args : aargs)
-          loop pats'' dcons'
-
-        -- make sure that the given list of constructors is impossible
-        -- in the current environment
-        checkImpossible :: [CtorDef] -> TcMonad [DataConName]
-        checkImpossible [] = return []
-        checkImpossible (CtorDef dc (Telescope tele) : rest) = do
-          this <-
-            ( do
-                tele' <- substTele delta tys tele
-                tcTypeTele tele'
-                return [dc]
-              )
-              `catchError` (\_ -> return [])
-          others <- checkImpossible rest
-          return (this ++ others)
-    Nothing ->
-      Env.err [DS "Cannot determine constructors of", DD ty]
+    decl' : _ -> Env.err [DS "Duplicate type declaration", DD decl, DS "Previous was", DD decl']
 
 
 -- | Given a particular data constructor name and a list of data
 -- constructor definitions, pull the definition out of the list and
 -- return it paired with the remainder of the list.
-removeDCon ::
-  DataConName ->
-  [CtorDef] ->
-  TcMonad (CtorDef, [CtorDef])
-removeDCon dc (cd@(CtorDef dc' _) : rest)
+removeDCon :: DataConName -> [CtorDef] -> TcMonad (CtorDef, [CtorDef])
+removeDCon dc (cd@(CtorDef dc' _ returnType) : rest)
   | dc == dc' =
     return (cd, rest)
 removeDCon dc (cd1 : rest) = do
   (cd2, rr) <- removeDCon dc rest
   return (cd2, cd1 : rr)
 removeDCon dc [] = Env.err [DS $ "Internal error: Can't find " ++ show dc]
-
--- | Given a particular data constructor name and a list of patterns,
--- pull out the subpatterns that occur as arguments to that data
--- constructor and return them paired with the remaining patterns.
-relatedPats :: DataConName -> [Pattern] -> ([[(Pattern, Epsilon)]], [Pattern])
-relatedPats dc [] = ([], [])
-relatedPats dc (pc@(PatVar _) : pats) = ([], pc : pats)
-relatedPats dc ((PatCon dc' args) : pats)
-  | dc == dc' =
-    let (aargs, rest) = relatedPats dc pats
-     in (args : aargs, rest)
-relatedPats dc (pc : pats) =
-  let (aargs, rest) = relatedPats dc pats
-   in (aargs, pc : rest)
-
-
--- | Occurs check for the subpatterns of a data constructor. Given
--- the telescope specifying the types of the arguments, plus the
--- subpatterns identified by relatedPats, check that they are each
--- exhaustive.
-
--- for simplicity, this function requires that all subpatterns
--- are pattern variables.
-checkSubPats :: DataConName -> [Entry] -> [[(Pattern, Epsilon)]] -> TcMonad ()
-checkSubPats dc [] _ = return ()
-checkSubPats dc (Def _ _ : tele) patss = checkSubPats dc tele patss
-checkSubPats dc (Decl _ : tele) patss
-  | (not . null) patss && not (any null patss) = do
-    let hds = map (fst . head) patss
-    let tls = map tail patss
-    case hds of
-      [PatVar _ ] -> checkSubPats dc tele tls
-      _ -> Env.err [DS "All subpatterns must be variables in this version."]
-checkSubPats dc t ps =
-  Env.err [DS "Internal error in checkSubPats", DD dc, DS (show ps)]
-
-
