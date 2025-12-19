@@ -73,6 +73,24 @@ class Trace(TaggedUnion):
         assert self.kind == self.KIND_RESULT
         return self.get_field(String)
 
+class Map[T1, T2](TaggedUnion):
+    kind: Literal[0, 1]
+    
+    KIND_BIN = 0
+    KIND_TIP = 1
+    
+    tip: ClassVar[Self]
+    
+    @classmethod
+    def init_bin(cls, *values: *tuple[Size, T1, T2, Map[T1, T2], Map[T1, T2]]):
+        return cls(cls.KIND_BIN, init_tuple(*values))
+    
+    def get_bin(self) -> tuple[Size, T1, T2, Map[T1, T2], Map[T1, T2]]:
+        assert self.kind == self.KIND_BIN
+        return self.get_field(Tuple[Size, T1, T2, Map[T1, T2], Map[T1, T2]]).get()
+
+Map.tip = Map(Map.KIND_TIP)
+
 class Name[T1](TaggedUnion):
     kind: Literal[0, 1]
     
@@ -173,28 +191,15 @@ class Term(TaggedUnion):
         return self.get_field(TyConName)
     
     @classmethod
-    def init_data_con(cls, value: DataConName):
-        return cls(cls.KIND_DATA_CON, value)
+    def init_data_con(cls, *values: *tuple[TyConName, DataConName]):
+        return cls(cls.KIND_DATA_CON, init_tuple(*values))
     
-    def get_data_con(self) -> DataConName:
+    def get_data_con(self) -> tuple[TyConName, DataConName]:
         assert self.kind == self.KIND_DATA_CON
-        return self.get_field(DataConName)
+        return self.get_field(Tuple[TyConName, DataConName]).get()
 
 Term.ty_type = Term(Term.KIND_TY_TYPE)
 Term.trust_me = Term(Term.KIND_TRUST_ME)
-
-class TypeDecl(TaggedUnion):
-    kind: Literal[0]
-    
-    KIND_TYPE_DECL = 0
-    
-    @classmethod
-    def init_type_decl(cls, *values: *tuple[TName, Type]):
-        return cls(cls.KIND_TYPE_DECL, init_tuple(*values))
-    
-    def get_type_decl(self) -> tuple[TName, Type]:
-        assert self.kind == self.KIND_TYPE_DECL
-        return self.get_field(Tuple[TName, Type]).get()
 
 class CtorDef(TaggedUnion):
     kind: Literal[0]
@@ -202,43 +207,12 @@ class CtorDef(TaggedUnion):
     KIND_CTOR_DEF = 0
     
     @classmethod
-    def init_ctor_def(cls, *values: *tuple[DataConName, Telescope, Type]):
+    def init_ctor_def(cls, *values: *tuple[DataConName, List[Tuple[TName, Type]], Type]):
         return cls(cls.KIND_CTOR_DEF, init_tuple(*values))
     
-    def get_ctor_def(self) -> tuple[DataConName, Telescope, Type]:
+    def get_ctor_def(self) -> tuple[DataConName, List[Tuple[TName, Type]], Type]:
         assert self.kind == self.KIND_CTOR_DEF
-        return self.get_field(Tuple[DataConName, Telescope, Type]).get()
-
-class Entry(TaggedUnion):
-    kind: Literal[0, 1, 2]
-    
-    KIND_DECL = 0
-    KIND_DEF = 1
-    KIND_DATA = 2
-    
-    @classmethod
-    def init_decl(cls, value: TypeDecl):
-        return cls(cls.KIND_DECL, value)
-    
-    def get_decl(self) -> TypeDecl:
-        assert self.kind == self.KIND_DECL
-        return self.get_field(TypeDecl)
-    
-    @classmethod
-    def init_def(cls, *values: *tuple[TName, Term]):
-        return cls(cls.KIND_DEF, init_tuple(*values))
-    
-    def get_def(self) -> tuple[TName, Term]:
-        assert self.kind == self.KIND_DEF
-        return self.get_field(Tuple[TName, Term]).get()
-    
-    @classmethod
-    def init_data(cls, *values: *tuple[TyConName, Telescope, List[CtorDef]]):
-        return cls(cls.KIND_DATA, init_tuple(*values))
-    
-    def get_data(self) -> tuple[TyConName, Telescope, List[CtorDef]]:
-        assert self.kind == self.KIND_DATA
-        return self.get_field(Tuple[TyConName, Telescope, List[CtorDef]]).get()
+        return self.get_field(Tuple[DataConName, List[Tuple[TName, Type]], Type]).get()
 
 class Env(TaggedUnion):
     kind: Literal[0]
@@ -246,22 +220,46 @@ class Env(TaggedUnion):
     KIND_ENV = 0
     
     @classmethod
-    def init_env(cls, *values: *tuple[List[Entry], Int, List[TypeDecl]]):
+    def init_env(cls, *values: *tuple[Map[TyConName, Tuple[List[Param], List[CtorDef]]], Map[TName, Tuple[Type, Term]], Map[TName, Type]]):
         return cls(cls.KIND_ENV, init_tuple(*values))
     
-    def get_env(self) -> tuple[List[Entry], Int, List[TypeDecl]]:
+    def get_env(self) -> tuple[Map[TyConName, Tuple[List[Param], List[CtorDef]]], Map[TName, Tuple[Type, Term]], Map[TName, Type]]:
         assert self.kind == self.KIND_ENV
-        return self.get_field(Tuple[List[Entry], Int, List[TypeDecl]]).get()
+        return self.get_field(Tuple[Map[TyConName, Tuple[List[Param], List[CtorDef]]], Map[TName, Tuple[Type, Term]], Map[TName, Type]]).get()
 
-Type = Term
+class Entry(TaggedUnion):
+    kind: Literal[0, 1]
+    
+    KIND_DECL = 0
+    KIND_DATA = 1
+    
+    @classmethod
+    def init_decl(cls, *values: *tuple[TName, Type, Term]):
+        return cls(cls.KIND_DECL, init_tuple(*values))
+    
+    def get_decl(self) -> tuple[TName, Type, Term]:
+        assert self.kind == self.KIND_DECL
+        return self.get_field(Tuple[TName, Type, Term]).get()
+    
+    @classmethod
+    def init_data(cls, *values: *tuple[TyConName, List[Tuple[TName, Type]], List[CtorDef]]):
+        return cls(cls.KIND_DATA, init_tuple(*values))
+    
+    def get_data(self) -> tuple[TyConName, List[Tuple[TName, Type]], List[CtorDef]]:
+        assert self.kind == self.KIND_DATA
+        return self.get_field(Tuple[TyConName, List[Tuple[TName, Type]], List[CtorDef]]).get()
+
+Size = Int
 
 TyConName = String
+
+Type = Term
 
 DataConName = String
 
 TName = Name[Term]
 
-Telescope = List[TypeDecl]
+Param = Tuple[TName, Type]
 
 set_export_signature("bind", [TName, Term], Bind[TName, Term])
 def bind(var: TName, body: Term) -> Bind[TName, Term]:

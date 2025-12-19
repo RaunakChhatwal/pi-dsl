@@ -5,23 +5,16 @@ from .bindings import Maybe
 from .term import DataType, Term, Type, Var
 
 @dataclass
-class TypeDecl:
+class Decl:
     name: Var
     signature: Type
-
-    def entry_binding(self) -> bindings.Entry:
-        return bindings.Entry.init_decl(
-            bindings.TypeDecl.init_type_decl(self.name.name_binding(), self.signature.binding()))
-
-@dataclass
-class Def:
-    name: Var
     body: Term
 
     def entry_binding(self) -> bindings.Entry:
-        return bindings.Entry.init_def(self.name.name_binding(), self.body.binding())
+        return bindings.Entry.init_decl(
+            self.name.name_binding(), self.signature.binding(), self.body.binding())
 
-type Entry = TypeDecl | Def | DataType
+type Entry = Decl | DataType
 
 def type_check(entries: list[Entry]):
     entry_bindings = [entry.entry_binding() for entry in entries]

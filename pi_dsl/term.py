@@ -3,9 +3,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import functools
 from typing import cast, Self
-from .base import Int, List, String
+from .base import init_tuple, Int, List, String
 from . import bindings
-from .bindings import bind, CtorDef, Entry, Name, Telescope, TName, TypeDecl
+from .bindings import bind, CtorDef, Entry, Name, TName
 
 class Term(ABC):
     @abstractmethod
@@ -55,35 +55,38 @@ hole = Var("_")
 
 type Param = Type | tuple[Var, Type]
 
-def raw_param(param: Param) -> tuple[Var, Term]:
+def raw_param(param: Param) -> tuple[Var, Type]:
     match param:
         case Term() as type_:
             return (hole, type_)
         case (var, type_):
             return (var, type_)
 
-def params_binding(params: list[Param]) -> Telescope:
-    bindings = [TypeDecl.init_type_decl(var.name_binding(), type_.binding())
-        for (var, type_) in map(raw_param, params)]
-    return List[TypeDecl](*bindings)
+def param_binding(param: Param) -> bindings.Param:
+    var, type_ = raw_param(param)
+    return init_tuple(var.name_binding(), type_.binding())
 
 @dataclass
 class Ctor(Term):
     name: str
+    typeName: str
     params: list[Param]
     returnType: Type
 
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_data_con(String(self.name))
+        return bindings.Term.init_data_con(String(self.name), String(self.typeName))
 
     def ctor_def(self) -> CtorDef:
         return CtorDef.init_ctor_def(
-            String(self.name), params_binding(self.params), self.returnType.binding())
+            String(self.name),
+            List[bindings.Param](*map(param_binding, self.params)),
+            self.returnType.binding()
+        )
 
 @dataclass
 class DataType(Term):
     name: str
-    type_params: list[Param]
+    params: list[Param]
     ctors: list[Ctor]
 
     def binding(self) -> bindings.Term:
@@ -92,7 +95,7 @@ class DataType(Term):
     def entry_binding(self) -> Entry:
         ctor_defs = List[CtorDef](*[ctor.ctor_def() for ctor in self.ctors])
         return bindings.Entry.init_data(
-            String(self.name), params_binding(self.type_params), ctor_defs)
+            String(self.name), List[bindings.Param](*map(param_binding, self.params)), ctor_defs)
 
 @dataclass
 class Lam(Term):

@@ -9,7 +9,7 @@ import qualified Unbound.Generics.LocallyNameless as Unbound
 main :: IO ()
 main = putStrLn $(do
   declOrder <- buildDeclOrder ''Env
-  bindings <- mapM bindingFromName $ [''Maybe, ''Either, ''Trace] ++ declOrder
+  bindings <- mapM bindingFromName $ [''Maybe, ''Either, ''Trace] ++ declOrder ++ [''Entry]
   bind <- functionBinding "bind" ["var", "body"]
     <$> sequence [[t|TName|], [t|Term|]] <*> [t|Unbound.Bind TName Term|]
   pprTerm <- functionBinding "ppr_term" ["term"]

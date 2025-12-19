@@ -1,7 +1,7 @@
 {- pi-forall language -}
 
 -- | A Pretty Printer.
-module PrettyPrint (Disp (..), D (..), SourcePos, PP.Doc, PP.render, ppr, debug, teleToPi) where
+module PrettyPrint (Disp (..), D (..), SourcePos, PP.Doc, ppr, debug, paramsToPi) where
 
 import Control.Monad.Reader (MonadReader (ask, local), asks)
 import Data.Set qualified as S
@@ -14,6 +14,7 @@ import Unbound.Generics.LocallyNameless qualified as Unbound
 import Unbound.Generics.LocallyNameless.Internal.Fold (toListOf)
 
 import Syntax
+import Data.String.Interpolate (i)
 
 -------------------------------------------------------------------------
 
@@ -120,42 +121,32 @@ instance Disp Entry
 
 instance Disp [Entry]
 
-instance Disp TypeDecl
-
 instance Disp Pattern
 
 instance Disp Match
 
-instance Display Telescope where
-  display typeDecls = display $ unwords $ map ppr typeDecls
-
 instance Disp CtorDef
-
-
 
 instance Display [Entry] where
   display ds = do
     dd <- mapM display ds
     pure $ PP.vcat dd
 
-instance Display TypeDecl where
-  display decl = do
-    dn <- display (declName decl)
-    dt <- display (declType decl)
+instance Display Param where
+  display (var, type') = do
+    dn <- display var
+    dt <- display type'
     pure $ dn <+> PP.text ":" <+> dt
 
 instance Display Entry where
-  display (Def n term) = do
-    dn <- display n
-    dt <- display term
-    pure $ dn <+> PP.text "=" <+> dt
-  display (Decl decl) = display decl
+  display (Decl var hint def) = foldl1 (<+>) <$> sequence
+    [display var, pure $ PP.text ":", display hint, pure $ PP.text "=", display def]
   display (Data n params constructors) = do
     dn <- display n
-    dp <- display params
+    dp <- mapM display params
     dc <- mapM display constructors
     pure $ PP.hang
-      ( PP.text "data" <+> dn <+> dp
+      ( PP.text "data" <+> dn <+> undefined -- dp
           <+> PP.colon
           <+> PP.text "Type"
           <+> PP.text "where"
@@ -163,19 +154,14 @@ instance Display Entry where
       2
       (PP.vcat dc)
 
-teleToPi :: Telescope -> Type -> Type
-teleToPi [] returnType = returnType
-teleToPi (TypeDecl paramName paramType : params) returnType =
-  TyPi paramType $ Unbound.bind paramName $ teleToPi params returnType
+paramsToPi :: [Param] -> Type -> Type
+paramsToPi [] returnType = returnType
+paramsToPi ((paramName, paramType) : params) returnType =
+  TyPi paramType $ Unbound.bind paramName $ paramsToPi params returnType
 
 instance Display CtorDef where
-  -- display (CtorDef c [] returnType) = do
-  --   pure $ PP.text c
   display (CtorDef name params returnType) = foldl1 (<+>) <$>
-    sequence [display name, pure $ PP.text ":", display $ teleToPi params returnType]
-    -- dc <- display c
-    -- dt <- display tele
-    -- pure $ dc <+> PP.text "of" <+> dt
+    sequence [display name, pure $ PP.text ":", display $ paramsToPi params returnType]
 
 
 -------------------------------------------------------------------------
@@ -336,7 +322,7 @@ instance Display Term where
     return $ PP.text "TRUSTME"
   display t | Just i <- isNumeral t = display i
   display (TyCon typeName) = display typeName
-  display (DataCon name) = display name
+  display (DataCon typeName ctorName) = display @String [i|#{typeName}.#{ctorName}|]
 
 instance Display Match where
   display (Match bd) =

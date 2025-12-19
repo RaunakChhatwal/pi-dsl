@@ -12,6 +12,8 @@ import qualified Unbound.Generics.LocallyNameless as Unbound
 import Control.Monad.Except (catchError)
 import Control.Monad (unless, zipWithM, zipWithM_)
 import Control.Monad.Trans (lift)
+import Control.Monad.Reader (asks)
+import qualified Data.Map as Map
 
 -- | compare two expressions for equality
 -- first check if they are alpha equivalent then
@@ -37,22 +39,15 @@ equate t1 t2 = do
 
     (TrustMe, TrustMe) ->  return ()
     (TyCon c1, TyCon c2) | c1 == c2 -> return ()
-    (DataCon ctor1, DataCon ctor2) | ctor1 == ctor2 -> return ()   
-    (_,_) -> tyErr n1 n2
- where tyErr n1 n2 = do 
-          gamma <- Env.getLocalCtx
-          Env.err [DS "Expected", DD n2,
-               DS "but found", DD n1,
-               DS "in context:", DD gamma]
+    (DataCon type1 ctor1, DataCon type2 ctor2) | type1 == type2 && ctor1 == ctor2 -> return ()   
+    (_,_) -> Env.err [DS "Expected", DD n2,  DS "but found", DD n1]
 
 -------------------------------------------------------
 -- | Convert a term to its weak-head normal form.
 whnf :: Term -> TcMonad Term  
-whnf (Var x) = do      
-  maybeDef <- Env.lookupDef x
-  case maybeDef of 
-    (Just def) -> whnf def
-    _ -> return (Var x)
+whnf (Var var) = Env.lookupDecl var >>= \case
+  (Just (_, def)) -> whnf def
+  _ -> return (Var var)
         
 whnf (App t1 t2) = do
   nf <- whnf t1 
@@ -64,8 +59,7 @@ whnf (App t1 t2) = do
 
 -- ignore/remove type annotations when normalizing  
 whnf (Ann tm _) = whnf tm  
--- all other terms are already in WHNF
--- don't do anything special for them
+-- all other terms are already in WHNF, don't do anything special for them
 whnf tm = return tm
 
 -- | 'Unify' the two terms, producing a list of definitions that 
@@ -74,7 +68,7 @@ whnf tm = return tm
 -- If there is an obvious mismatch, fail with an error
 -- If either term is "ambiguous" (i.e. neutral), give up and 
 -- succeed with an empty list
-unify :: [TName] -> Term -> Term -> TcMonad [Entry]
+unify :: [TName] -> Term -> Term -> TcMonad [(TName, Term)]
 unify ns tx ty = do
   txnf <- whnf tx
   tynf <- whnf ty
@@ -82,11 +76,10 @@ unify ns tx ty = do
     then return []
     else case (txnf, tynf) of
       (Var x, Var y) | x == y -> return []
-      (Var y, yty) | y `notElem` ns -> return [Def y yty]
-      (yty, Var y) | y `notElem` ns -> return [Def y yty]
-      
+      (Var y, yty) | y `notElem` ns -> return [(y, yty)]
+      (yty, Var y) | y `notElem` ns -> return [(y, yty)]
       (TyCon s1, TyCon s2) | s1 == s2 -> return []
-      (DataCon s1, DataCon s2) | s1 == s2 -> return []  -- TODO: assess ambiguity
+      (DataCon type1 ctor1, DataCon type2 ctor2) | type1 == type2 && ctor1 == ctor2 -> return []
       (Lam bnd1, Lam bnd2) -> do
         (x, b1, b2) <- unbind2 bnd1 bnd2
         unify (x:ns) b1 b2

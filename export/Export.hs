@@ -5,14 +5,14 @@ module Export where
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
 import Bindings (implStorable, alignOffsetUp, buildDeclOrder, sizeOf, alignment, exportFunction)
-import Syntax(Entry, Term, TName)
+import Syntax(Entry(Data, Decl), Term, TName)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)
 import Data.Functor ((<&>))
 import Data.String.Interpolate (i)
 import PrettyPrint (ppr)
 import Environment (Env, Err, runTcMonad, TcMonad, Trace, traceTcMonad)
-import TypeCheck (checkType, inferType, tcEntry, HintOrCtx(..))
+import TypeCheck (checkType, inferType, tcEntry)
 import Control.Monad (join, foldM_, void)
 import qualified Environment as Env
 import Control.Monad.Trans (liftIO)
@@ -63,6 +63,7 @@ instance F.Storable a => F.Storable [a] where
 
 $(mapM (fmap fromJust . implStorable) [''Maybe, ''Either, ''Trace])
 $(catMaybes <$> (mapM implStorable =<< buildDeclOrder ''Env))
+$(pure . fromJust <$> implStorable ''Entry)
 
 $(join $ exportFunction "bind"
   <$> sequence [[t|TName|], [t|Term|]]
@@ -71,11 +72,11 @@ $(join $ exportFunction "bind"
 
 $(join $ exportFunction "ppr_term" <$> sequence [[t|Term|]] <*> [t|String|] <*> [| return . ppr |])
 
-tcEntries :: [Entry] -> TcMonad HintOrCtx
-tcEntries entries = foldr1 tcNextEntry (map tcEntry entries) where
-  tcNextEntry curr next = curr >>= \case
-    AddHint hint -> Env.extendHints hint next
-    AddCtx decls -> Env.extendCtxsGlobal decls next
+tcEntries :: [Entry] -> TcMonad ()
+tcEntries = foldr tcNextEntry (return ()) where
+  tcNextEntry curr next = tcEntry curr >> case curr of
+    Decl var type' def -> Env.addDecl var type' def next
+    Data name params ctors -> Env.addDataType name params ctors next
 
 $(join $ exportFunction "type_check"
   <$> sequence [[t| [Entry] |]] <*> [t| Maybe String |] <*> [| return . runTcMonad . tcEntries |])
