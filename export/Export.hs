@@ -12,7 +12,7 @@ import Data.Functor ((<&>))
 import Data.String.Interpolate (i)
 import PrettyPrint (ppr)
 import Environment (Env, Err, runTcMonad, TcMonad, Trace, traceTcMonad)
-import TypeCheck (checkType, inferType, tcEntry)
+import TypeCheck (checkType, inferType, tcEntries)
 import Control.Monad (join, foldM_, void)
 import qualified Environment as Env
 import Control.Monad.Trans (liftIO)
@@ -71,12 +71,6 @@ $(join $ exportFunction "bind"
   <*> [| \var body -> return (Unbound.bind var body) |])
 
 $(join $ exportFunction "ppr_term" <$> sequence [[t|Term|]] <*> [t|String|] <*> [| return . ppr |])
-
-tcEntries :: [Entry] -> TcMonad ()
-tcEntries = foldr tcNextEntry (return ()) where
-  tcNextEntry curr next = tcEntry curr >> case curr of
-    Decl var type' def -> Env.addDecl var type' def next
-    Data name params ctors -> Env.addDataType name params ctors next
 
 $(join $ exportFunction "type_check"
   <$> sequence [[t| [Entry] |]] <*> [t| Maybe String |] <*> [| return . runTcMonad . tcEntries |])

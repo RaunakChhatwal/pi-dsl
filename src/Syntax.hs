@@ -1,6 +1,3 @@
-
--- | The abstract syntax of the simple dependently typed language
--- See the comment at the top of 'Parser' for the concrete syntax of this language
 module Syntax where
 
 import Data.Maybe (fromMaybe)
@@ -28,51 +25,31 @@ data Term
     Lam (Unbound.Bind TName Term)
   | -- | application `a b`
     App Term Term
-  | -- | function type   `(x : A) -> B`
-    TyPi Type (Unbound.Bind TName Type)
+  | -- | function type `(x : A) -> B`
+    Pi Type (Unbound.Bind TName Type)
   | -- | annotated terms `( a : A )`
     Ann Term Type
   | -- | an axiom 'TRUSTME', inhabits all types
     TrustMe
   | -- | type constructors (fully applied)
-    TyCon TyConName
+    TyCon TypeName
   | -- | term constructors (fully applied)
-    DataCon TyConName DataConName
+    DataCon TypeName CtorName
   deriving (Show, Generic)
 
 -- | A 'Match' represents a case alternative
 newtype Match = Match (Unbound.Bind Pattern Term)
   deriving (Show, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
-data Pattern = PatVar TName | PatCon DataConName [Pattern]
+data Pattern = PatVar TName | PatCon TypeName [Pattern]
   deriving (Show, Eq, Generic, Typeable, Unbound.Alpha, Unbound.Subst Term)
 
-type Param = (TName, Type)
-
 -- | Entries are the components of modules
-data Entry = Decl TName Type Term | Data TyConName [(TName, Type)] [CtorDef]
+data Entry = Decl TName Type Term | Data TypeName Type [(CtorName, Type)]
   deriving (Show, Generic, Typeable) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
--- | type constructor names
-type TyConName = String
-
--- | data constructor names
-type DataConName = String
-
--- | A Data constructor has a name and a telescope of arguments
-data CtorDef = CtorDef DataConName [(TName, Type)] Type
-  deriving (Show, Generic)
-  deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
-
--- ** Telescopes
-
--- | A telescope is like a first class context. It is a list of 
--- assumptions, binding each variable in terms that appear
--- later in the list.
--- type Telescope = [TypeDecl]
-
------------------------------------------
--- Definitions related to datatypes
+type TypeName = String
+type CtorName = String
 
 -- | Is this the syntax of a literal (natural) number
 isNumeral :: Term -> Maybe Int
@@ -84,13 +61,6 @@ isNumeral _ = Nothing
 strip :: Term -> Term
 strip (Ann tm _) = strip tm
 strip tm = tm
-
--- | in binders `x.a1` and `x.a2` replace `x` with a fresh name in both terms
--- TODO: test this
-unbind2 :: (Unbound.Fresh m) => Unbound.Bind TName Term -> Unbound.Bind TName Term -> m (TName, Term, Term)
-unbind2 b1 b2 = Unbound.unbind2 b1 b2 >>= \case 
-  Just (x, t, _, u) -> return (x, t, u)
-  Nothing -> error "impossible" 
 
 -- * `Alpha` class instances
 

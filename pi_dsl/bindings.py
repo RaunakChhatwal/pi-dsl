@@ -133,7 +133,7 @@ class Term(TaggedUnion):
     KIND_VAR = 1
     KIND_LAM = 2
     KIND_APP = 3
-    KIND_TY_PI = 4
+    KIND_PI = 4
     KIND_ANN = 5
     KIND_TRUST_ME = 6
     KIND_TY_CON = 7
@@ -167,11 +167,11 @@ class Term(TaggedUnion):
         return self.get_field(Tuple[Term, Term]).get()
     
     @classmethod
-    def init_ty_pi(cls, *values: *tuple[Type, Bind[TName, Type]]):
-        return cls(cls.KIND_TY_PI, init_tuple(*values))
+    def init_pi(cls, *values: *tuple[Type, Bind[TName, Type]]):
+        return cls(cls.KIND_PI, init_tuple(*values))
     
-    def get_ty_pi(self) -> tuple[Type, Bind[TName, Type]]:
-        assert self.kind == self.KIND_TY_PI
+    def get_pi(self) -> tuple[Type, Bind[TName, Type]]:
+        assert self.kind == self.KIND_PI
         return self.get_field(Tuple[Type, Bind[TName, Type]]).get()
     
     @classmethod
@@ -183,36 +183,23 @@ class Term(TaggedUnion):
         return self.get_field(Tuple[Term, Type]).get()
     
     @classmethod
-    def init_ty_con(cls, value: TyConName):
+    def init_ty_con(cls, value: TypeName):
         return cls(cls.KIND_TY_CON, value)
     
-    def get_ty_con(self) -> TyConName:
+    def get_ty_con(self) -> TypeName:
         assert self.kind == self.KIND_TY_CON
-        return self.get_field(TyConName)
+        return self.get_field(TypeName)
     
     @classmethod
-    def init_data_con(cls, *values: *tuple[TyConName, DataConName]):
+    def init_data_con(cls, *values: *tuple[TypeName, CtorName]):
         return cls(cls.KIND_DATA_CON, init_tuple(*values))
     
-    def get_data_con(self) -> tuple[TyConName, DataConName]:
+    def get_data_con(self) -> tuple[TypeName, CtorName]:
         assert self.kind == self.KIND_DATA_CON
-        return self.get_field(Tuple[TyConName, DataConName]).get()
+        return self.get_field(Tuple[TypeName, CtorName]).get()
 
 Term.ty_type = Term(Term.KIND_TY_TYPE)
 Term.trust_me = Term(Term.KIND_TRUST_ME)
-
-class CtorDef(TaggedUnion):
-    kind: Literal[0]
-    
-    KIND_CTOR_DEF = 0
-    
-    @classmethod
-    def init_ctor_def(cls, *values: *tuple[DataConName, List[Tuple[TName, Type]], Type]):
-        return cls(cls.KIND_CTOR_DEF, init_tuple(*values))
-    
-    def get_ctor_def(self) -> tuple[DataConName, List[Tuple[TName, Type]], Type]:
-        assert self.kind == self.KIND_CTOR_DEF
-        return self.get_field(Tuple[DataConName, List[Tuple[TName, Type]], Type]).get()
 
 class Env(TaggedUnion):
     kind: Literal[0]
@@ -220,12 +207,12 @@ class Env(TaggedUnion):
     KIND_ENV = 0
     
     @classmethod
-    def init_env(cls, *values: *tuple[Map[TyConName, Tuple[List[Param], List[CtorDef]]], Map[TName, Tuple[Type, Term]], Map[TName, Type]]):
+    def init_env(cls, *values: *tuple[Map[TypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[TName, Tuple[Type, Term]], Map[TName, Type]]):
         return cls(cls.KIND_ENV, init_tuple(*values))
     
-    def get_env(self) -> tuple[Map[TyConName, Tuple[List[Param], List[CtorDef]]], Map[TName, Tuple[Type, Term]], Map[TName, Type]]:
+    def get_env(self) -> tuple[Map[TypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[TName, Tuple[Type, Term]], Map[TName, Type]]:
         assert self.kind == self.KIND_ENV
-        return self.get_field(Tuple[Map[TyConName, Tuple[List[Param], List[CtorDef]]], Map[TName, Tuple[Type, Term]], Map[TName, Type]]).get()
+        return self.get_field(Tuple[Map[TypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[TName, Tuple[Type, Term]], Map[TName, Type]]).get()
 
 class Entry(TaggedUnion):
     kind: Literal[0, 1]
@@ -242,24 +229,22 @@ class Entry(TaggedUnion):
         return self.get_field(Tuple[TName, Type, Term]).get()
     
     @classmethod
-    def init_data(cls, *values: *tuple[TyConName, List[Tuple[TName, Type]], List[CtorDef]]):
+    def init_data(cls, *values: *tuple[TypeName, Type, List[Tuple[CtorName, Type]]]):
         return cls(cls.KIND_DATA, init_tuple(*values))
     
-    def get_data(self) -> tuple[TyConName, List[Tuple[TName, Type]], List[CtorDef]]:
+    def get_data(self) -> tuple[TypeName, Type, List[Tuple[CtorName, Type]]]:
         assert self.kind == self.KIND_DATA
-        return self.get_field(Tuple[TyConName, List[Tuple[TName, Type]], List[CtorDef]]).get()
+        return self.get_field(Tuple[TypeName, Type, List[Tuple[CtorName, Type]]]).get()
 
 Size = Int
 
-TyConName = String
-
-Type = Term
-
-DataConName = String
+TypeName = String
 
 TName = Name[Term]
 
-Param = Tuple[TName, Type]
+CtorName = String
+
+Type = Term
 
 set_export_signature("bind", [TName, Term], Bind[TName, Term])
 def bind(var: TName, body: Term) -> Bind[TName, Term]:

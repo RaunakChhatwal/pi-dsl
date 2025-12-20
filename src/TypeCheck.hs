@@ -1,19 +1,19 @@
 module TypeCheck where
 
 import Control.Monad.Except (catchError, throwError)
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Environment (TcMonad, traceM)
 import Environment qualified as Env
 import Equal qualified
-import PrettyPrint (D(DS, DD), Disp (disp), ppr, paramsToPi)
+import PrettyPrint (D(DS, DD), Disp (disp), ppr)
 import Syntax
 import Text.PrettyPrint.HughesPJ (($$), render)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.String.Interpolate (i)
-import Data.Functor ((<&>))
+import Control.Monad.Trans (lift)
 
-betaReduceTyPi :: (Type, Unbound.Bind TName Type) -> Term -> TcMonad Type
-betaReduceTyPi (paramType, returnType) arg = do
+reduceTyPi :: (Type, Unbound.Bind TName Type) -> Term -> TcMonad Type
+reduceTyPi (paramType, returnType) arg = do
   checkType arg paramType
   return $ Unbound.instantiate returnType [arg]
 
@@ -24,22 +24,16 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
 
   TyType -> return TyType
 
-  TyPi tyA bnd -> do
-    (x, tyB) <- Unbound.unbind bnd
-    checkType tyA TyType
-    Env.addLocal x tyA $ checkType tyB TyType
+  Pi paramType bind -> do
+    (paramName, returnType) <- Unbound.unbind bind
+    checkType paramType TyType
+    Env.addLocal paramName paramType $ checkType returnType TyType
     return TyType
 
   App func arg -> do
     funcType <- inferType func
     Equal.whnf funcType >>= \case
-      TyPi paramType returnType -> betaReduceTyPi (paramType, returnType) arg
-
-      typeCtor@(TyCon _) -> inferType typeCtor >>= \case
-        TyType -> undefined -- TODO: throw error message
-        TyPi paramType returnType -> betaReduceTyPi (paramType, returnType) arg
-        _ -> undefined
-
+      Pi paramType bind -> reduceTyPi (paramType, bind) arg
       _ -> Env.err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
 
   Ann a tyA -> do
@@ -47,13 +41,9 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
     checkType a tyA
     return tyA
 
-  -- Type constructor application
-  TyCon typeName -> do
-    (typeParams, _) <- Env.lookupDataType typeName
-    return $ paramsToPi typeParams TyType
+  TyCon typeName -> fst <$> Env.lookupDataType typeName
 
-  DataCon typeName ctorName -> Env.lookupCtor (typeName, ctorName) <&>
-    \(_, CtorDef _ ctorParams returnType) -> paramsToPi ctorParams returnType
+  DataCon typeName ctorName -> Env.lookupCtor (typeName, ctorName)
 
   _ -> Env.err [DS "Need a type annotation for", DD term]
 
@@ -62,12 +52,12 @@ checkType :: Term -> Type -> TcMonad ()
 checkType tm ty = traceM "checkType" [ppr tm, ppr ty] (const "") $ do
   ty' <- Equal.whnf ty
   case tm of
-    Lam bnd -> case ty' of
-      TyPi tyA bnd2 -> do
+    Lam bodyBind -> case ty' of
+      Pi paramType typeBind -> do
         -- unbind the variables in the lambda expression and pi type
-        (x, body, tyB) <- unbind2 bnd bnd2
+        (var, body, _, type') <- lift $ Unbound.unbind2Plus bodyBind typeBind
         -- check the type of the body of the lambda expression
-        Env.addLocal x tyA $ checkType body tyB
+        Env.addLocal var paramType $ checkType body type'
       _ -> Env.err [DS "Lambda expression should have a function type, not", DD ty']
 
     TrustMe -> return ()
@@ -75,6 +65,47 @@ checkType tm ty = traceM "checkType" [ppr tm, ppr ty] (const "") $ do
     _ -> do
       tyA <- inferType tm
       Equal.equate tyA ty'
+
+unfoldPi :: Type -> [Type] -> TcMonad ([Type], Type)
+unfoldPi (Pi paramType bind) paramTypes = do
+  (_, returnType) <- Unbound.unbind bind
+  unfoldPi returnType (paramType : paramTypes)
+unfoldPi returnType paramTypes = return (reverse paramTypes, returnType)
+
+checkCtorReturnsSelf :: CtorName -> TypeName -> Type -> TcMonad ()
+checkCtorReturnsSelf _ self (TyCon typeName) | typeName == self = return ()
+checkCtorReturnsSelf ctorName self (App typeCtor _) = checkCtorReturnsSelf ctorName self typeCtor
+checkCtorReturnsSelf ctorName self _ =
+  Env.err [DS "Constructor", DD ctorName, DS "must return", DD self]
+
+throwIfFound :: TypeName -> Type -> TcMonad ()
+throwIfFound typeName type' = Equal.whnf type' >>= \case
+  TyType -> return ()
+  Var _ -> return ()
+  Lam bind -> do
+    (_, body) <- Unbound.unbind bind
+    throwIfFound typeName body
+  App a b -> mapM_ (throwIfFound typeName) [a, b]
+  Pi paramType bind -> do
+    throwIfFound typeName paramType
+    (_, returnType) <- Unbound.unbind bind
+    throwIfFound typeName returnType
+  Ann term _ -> throwIfFound typeName term
+  TrustMe -> return ()
+  TyCon name -> when (name == typeName) $
+    Env.err [DS "Invalid occurence of data type", DD typeName, DS "being declared"]
+  DataCon _ _ -> return ()
+
+checkStrictPositivity :: TypeName -> Type -> TcMonad ()
+checkStrictPositivity self paramType = Equal.whnf paramType >>= \case
+  App a b -> do
+    throwIfFound self b
+    checkStrictPositivity self a
+  Pi paramType bind -> do
+    throwIfFound self paramType
+    (_, returnType) <- Unbound.unbind bind
+    checkStrictPositivity self returnType
+  _ -> return ()
 
 -- | Check each sort of declaration in a module
 tcEntry :: Entry -> TcMonad ()
@@ -85,7 +116,15 @@ tcEntry entry = traceM "tcEntry" [ppr entry] (const "") $ case entry of
       handler (Env.Err msg) = throwError $ Env.Err (msg $$ msg')
       msg' = disp [DS "When checking the term", DD term, DS "against the type", DD hint]
   dataDecl@(Data typeName typeParams ctors) -> do
-    checkType (paramsToPi typeParams TyType) TyType
-    -- TODO: check strict positivity, returnType is self
-    forM_ ctors $ \(CtorDef name params returnType) ->
-      Env.addDataType typeName typeParams [] $ checkType (paramsToPi params returnType) TyType
+    checkType typeParams TyType
+    forM_ ctors $ \(ctorName, ctorType) -> do
+      Env.addDataType typeName typeParams [] $ checkType ctorType TyType
+      (paramTypes, returnType) <- unfoldPi ctorType []
+      checkCtorReturnsSelf ctorName typeName =<< Equal.whnf returnType
+      mapM (checkStrictPositivity typeName) paramTypes
+
+tcEntries :: [Entry] -> TcMonad ()
+tcEntries [] = return ()
+tcEntries (entry : rest) = tcEntry entry >> case entry of
+  Decl var type' def -> Env.addDecl var type' def (tcEntries rest)
+  Data name params ctors -> Env.addDataType name params ctors (tcEntries rest)

@@ -3,9 +3,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import functools
 from typing import cast, Self
-from .base import init_tuple, Int, List, String
+from .base import init_tuple, Int, List, String, Tuple
 from . import bindings
-from .bindings import bind, CtorDef, Entry, Name, TName
+from .bindings import bind, Entry, Name, TName
 
 class Term(ABC):
     @abstractmethod
@@ -57,31 +57,23 @@ type Param = Type | tuple[Var, Type]
 
 def raw_param(param: Param) -> tuple[Var, Type]:
     match param:
-        case Term() as type_:
-            return (hole, type_)
-        case (var, type_):
-            return (var, type_)
-
-def param_binding(param: Param) -> bindings.Param:
-    var, type_ = raw_param(param)
-    return init_tuple(var.name_binding(), type_.binding())
+        case Term() as param_type:
+            return (hole, param_type)
+        case (var, param_type):
+            return (var, param_type)
 
 @dataclass
 class Ctor(Term):
     name: str
-    typeName: str
+    datatype: DataType
     params: list[Param]
     returnType: Type
 
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_data_con(String(self.name), String(self.typeName))
+        return bindings.Term.init_data_con(String(self.name), String(self.datatype.name))
 
-    def ctor_def(self) -> CtorDef:
-        return CtorDef.init_ctor_def(
-            String(self.name),
-            List[bindings.Param](*map(param_binding, self.params)),
-            self.returnType.binding()
-        )
+    def signature_binding(self) -> bindings.Type:
+        return Pi(self.params, self.returnType).binding()
 
 @dataclass
 class DataType(Term):
@@ -93,9 +85,10 @@ class DataType(Term):
         return bindings.Term.init_ty_con(String(self.name))
 
     def entry_binding(self) -> Entry:
-        ctor_defs = List[CtorDef](*[ctor.ctor_def() for ctor in self.ctors])
+        ctor_defs = List[Tuple[String, bindings.Type]](
+            *[init_tuple(String(ctor.name), ctor.signature_binding()) for ctor in self.ctors])
         return bindings.Entry.init_data(
-            String(self.name), List[bindings.Param](*map(param_binding, self.params)), ctor_defs)
+            String(self.name), Pi(self.params, Universe).binding(), ctor_defs)
 
 @dataclass
 class Lam(Term):
@@ -109,10 +102,10 @@ class Lam(Term):
             case param_name:
                 param_names = [param_name]
 
-        lam_binding = self.body.binding()
+        binding = self.body.binding()
         for param_name in reversed(param_names):
-            lam_binding = bindings.Term.init_lam(bind(param_name.name_binding(), lam_binding))
-        return lam_binding
+            binding = bindings.Term.init_lam(bind(param_name.name_binding(), binding))
+        return binding
 
 @dataclass
 class Pi(Term):
@@ -126,11 +119,10 @@ class Pi(Term):
             case param:
                 params = [param]
 
-        pi_binding = self.return_type.binding()
-        for (var, type_) in map(raw_param, reversed(params)):
-            pi_binding = bindings.Term.init_ty_pi(
-                type_.binding(), bind(var.name_binding(), pi_binding))
-        return pi_binding
+        binding = self.return_type.binding()
+        for (var, param_type) in map(raw_param, reversed(params)):
+            binding = bindings.Term.init_pi(param_type.binding(), bind(var.name_binding(), binding))
+        return binding
 
 class UniverseSingleton(Term):
     def binding(self) -> bindings.Term:
@@ -138,4 +130,4 @@ class UniverseSingleton(Term):
 
 Universe = UniverseSingleton()
 
-type TermUnion = Ann | App | Ctor | DataType | Lam | Pi | Var | UniverseSingleton
+type TermUnion = Ann | App | Ctor | DataType | Lam | Pi | UniverseSingleton | Var

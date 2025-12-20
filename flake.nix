@@ -7,7 +7,7 @@
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system: {
       devShells.default = with nixpkgs.legacyPackages.${system}; mkShell {
-        buildInputs = [ ghc cabal-install haskell-language-server pyright ];
+        buildInputs = [ ghc cabal-install haskell-language-server pyright python3 ];
       };
     });
 }

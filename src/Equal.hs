@@ -1,6 +1,3 @@
-{- pi-forall language -}
-
--- | Compare two terms for equality
 module Equal (whnf, equate, unify) where
 
 import Syntax
@@ -27,16 +24,15 @@ equate t1 t2 = do
   case (n1, n2) of 
     (TyType, TyType) -> return ()
     (Var x,  Var y) | x == y -> return ()
-    (Lam bnd1, Lam bnd2) -> do
-      (_, b1, b2) <- unbind2 bnd1 bnd2
-      equate b1 b2
+    (Lam bind1, Lam bind2) -> do
+      (var, body1, _, body2) <- lift $ Unbound.unbind2Plus bind1 bind2
+      equate body1 body2
     (App a1 a2, App b1 b2) ->
       equate a1 b1 >> equate a2 b2
-    (TyPi tyA1 bnd1, TyPi tyA2 bnd2) -> do 
-      (_, tyB1, tyB2) <- unbind2 bnd1 bnd2
-      equate tyA1 tyA2                                             
-      equate tyB1 tyB2
-
+    (Pi paramType1 bind1, Pi paramType2 bind2) -> do
+      equate paramType1 paramType2
+      (paramName, returnType1, _, returnType2) <- lift $ Unbound.unbind2Plus bind1 bind2
+      equate returnType1 returnType2
     (TrustMe, TrustMe) ->  return ()
     (TyCon c1, TyCon c2) | c1 == c2 -> return ()
     (DataCon type1 ctor1, DataCon type2 ctor2) | type1 == type2 && ctor1 == ctor2 -> return ()   
@@ -80,14 +76,12 @@ unify ns tx ty = do
       (yty, Var y) | y `notElem` ns -> return [(y, yty)]
       (TyCon s1, TyCon s2) | s1 == s2 -> return []
       (DataCon type1 ctor1, DataCon type2 ctor2) | type1 == type2 && ctor1 == ctor2 -> return []
-      (Lam bnd1, Lam bnd2) -> do
-        (x, b1, b2) <- unbind2 bnd1 bnd2
-        unify (x:ns) b1 b2
-      (TyPi tyA1 bnd1, TyPi tyA2 bnd2) -> do
-        (x, tyB1, tyB2) <- unbind2 bnd1 bnd2
-        ds1 <- unify ns tyA1 tyA2
-        ds2 <- unify (x:ns) tyB1 tyB2
-        return (ds1 ++ ds2)
+      (Lam bind1, Lam bind2) -> do
+        (var, body1, _, body2) <- lift $ Unbound.unbind2Plus bind1 bind2
+        unify (var:ns) body1 body2
+      (Pi paramType1 bind1, Pi paramType2 bind2) -> do
+        (paramName, returnType1, _, returnType2) <- lift $ Unbound.unbind2Plus bind1 bind2
+        (++) <$> unify ns paramType1 paramType2 <*> unify (paramName : ns) returnType1 returnType2
       (App _ _, _) -> return []
       (_, App _ _) -> return []
       _ -> Env.err [DS "Cannot equate", DD txnf, DS "and", DD tynf]

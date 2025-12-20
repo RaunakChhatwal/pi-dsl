@@ -43,7 +43,7 @@ traceTcMonad = go [] where
     Right (Right (trace, rest)) -> go (trace : traces) rest
 
 data Env = Env {
-  datatypes :: Map TyConName ([Param], [CtorDef]),
+  datatypes :: Map TypeName (Type, [(CtorName, Type)]),
   decls :: Map TName (Type, Term),
   locals :: Map TName Type
 }
@@ -65,7 +65,7 @@ lookupType var = asks (Map.lookup var . decls &&& Map.lookup var . locals) >>= \
 addLocal :: TName -> Type -> TcMonad a -> TcMonad a
 addLocal var type' = local $ \env@(Env _ _ locals) -> env { locals = Map.insert var type' locals }
 
-addDataType :: TyConName -> [Param] -> [CtorDef] -> TcMonad a -> TcMonad a
+addDataType :: TypeName -> Type -> [(CtorName, Type)] -> TcMonad a -> TcMonad a
 addDataType name params ctors monad = asks (Map.lookup name . datatypes) >>= \case
   Nothing -> flip local monad $
     \env@(Env datatypes _ _) -> env { datatypes = Map.insert name (params, ctors) datatypes }
@@ -77,16 +77,16 @@ addDecl var type' def monad = asks (Map.lookup var . decls) >>= \case
     \env@(Env _ decls _) -> env { decls = Map.insert var (type', def) decls }
   Just _ -> err [DS "Name conflict when declaring variable", DD var]
 
-lookupDataType :: TyConName -> TcMonad ([Param], [CtorDef])
+lookupDataType :: TypeName -> TcMonad (Type, [(CtorName, Type)])
 lookupDataType typeName =
   justOr [DS "Data type", DD typeName, DS "not found"] $ asks (Map.lookup typeName . datatypes)
 
-lookupCtor :: (TyConName, DataConName) -> TcMonad ([Param], CtorDef)
+lookupCtor :: (TypeName, CtorName) -> TcMonad Type
 lookupCtor (typeName, ctorName) = do
-  (typeParams, ctorDefs) <- lookupDataType typeName
-  case find (\(CtorDef name _ _) -> name == ctorName) ctorDefs of
+  (_, ctorDefs) <- lookupDataType typeName
+  case lookup ctorName ctorDefs of
     Nothing -> err [DS "Constructor", DD ctorName, DS "not found in data type", DD typeName]
-    Just ctorDef -> return (typeParams, ctorDef)
+    Just ctorType -> return ctorType
 
 -- | An error that should be reported to the user
 newtype Err = Err Doc

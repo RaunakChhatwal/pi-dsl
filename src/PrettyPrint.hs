@@ -1,7 +1,7 @@
 {- pi-forall language -}
 
 -- | A Pretty Printer.
-module PrettyPrint (Disp (..), D (..), SourcePos, PP.Doc, ppr, debug, paramsToPi) where
+module PrettyPrint (Disp (..), D (..), SourcePos, PP.Doc, ppr, debug) where
 
 import Control.Monad.Reader (MonadReader (ask, local), asks)
 import Data.Set qualified as S
@@ -125,43 +125,32 @@ instance Disp Pattern
 
 instance Disp Match
 
-instance Disp CtorDef
 
 instance Display [Entry] where
   display ds = do
     dd <- mapM display ds
     pure $ PP.vcat dd
 
-instance Display Param where
-  display (var, type') = do
-    dn <- display var
-    dt <- display type'
-    pure $ dn <+> PP.text ":" <+> dt
 
 instance Display Entry where
   display (Decl var hint def) = foldl1 (<+>) <$> sequence
     [display var, pure $ PP.text ":", display hint, pure $ PP.text "=", display def]
   display (Data n params constructors) = do
     dn <- display n
-    dp <- mapM display params
-    dc <- mapM display constructors
+    dp <- display params
+    dc <- mapM (\(ctorName, ctorType) -> do
+      dcn <- display ctorName
+      dct <- display ctorType
+      pure $ dcn <+> PP.text ":" <+> dct) constructors
     pure $ PP.hang
-      ( PP.text "data" <+> dn <+> undefined -- dp
-          <+> PP.colon
-          <+> PP.text "Type"
+      ( PP.text "data" <+> dn <+> PP.text ":"
+          <+> dp
           <+> PP.text "where"
       )
       2
       (PP.vcat dc)
 
-paramsToPi :: [Param] -> Type -> Type
-paramsToPi [] returnType = returnType
-paramsToPi ((paramName, paramType) : params) returnType =
-  TyPi paramType $ Unbound.bind paramName $ paramsToPi params returnType
 
-instance Display CtorDef where
-  display (CtorDef name params returnType) = foldl1 (<+>) <$>
-    sequence [display name, pure $ PP.text ":", display $ paramsToPi params returnType]
 
 
 -------------------------------------------------------------------------
@@ -299,7 +288,7 @@ instance Display Term where
     df <- withPrec levelApp (display f)
     dx <- withPrec (levelApp+1) (display x)
     return $ parens (levelApp < n) $ df <+> dx
-  display (TyPi a bnd) = do
+  display (Pi a bnd) = do
     Unbound.lunbind bnd $ \(n, b) -> do
       p <- ask prec
       lhs <-

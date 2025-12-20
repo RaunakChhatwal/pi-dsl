@@ -241,7 +241,6 @@ generateBindings bindings = intercalate "\n\n" (imports : classes ++ aliases ++ 
     ["from __future__ import annotations",
      "from typing import ClassVar, Literal, Self",
      "from .base import *"]
-    --  \Bool, call_export, Int, List, set_export_signature, String, TaggedUnion, Tuple"]
 
 alignOffsetUp :: Int -> Int -> Int
 alignOffsetUp offset alignment =
