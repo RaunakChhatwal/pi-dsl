@@ -34,8 +34,8 @@ equate t1 t2 = do
       (paramName, returnType1, _, returnType2) <- lift $ Unbound.unbind2Plus bind1 bind2
       equate returnType1 returnType2
     (TrustMe, TrustMe) ->  return ()
-    (TyCon c1, TyCon c2) | c1 == c2 -> return ()
-    (DataCon type1 ctor1, DataCon type2 ctor2) | type1 == type2 && ctor1 == ctor2 -> return ()   
+    (DataType c1, DataType c2) | c1 == c2 -> return ()
+    (Ctor type1 ctor1, Ctor type2 ctor2) | type1 == type2 && ctor1 == ctor2 -> return ()   
     (_,_) -> Env.err [DS "Expected", DD n2,  DS "but found", DD n1]
 
 -------------------------------------------------------
@@ -64,7 +64,7 @@ whnf tm = return tm
 -- If there is an obvious mismatch, fail with an error
 -- If either term is "ambiguous" (i.e. neutral), give up and 
 -- succeed with an empty list
-unify :: [TName] -> Term -> Term -> TcMonad [(TName, Term)]
+unify :: [TermName] -> Term -> Term -> TcMonad [(TermName, Term)]
 unify ns tx ty = do
   txnf <- whnf tx
   tynf <- whnf ty
@@ -74,8 +74,8 @@ unify ns tx ty = do
       (Var x, Var y) | x == y -> return []
       (Var y, yty) | y `notElem` ns -> return [(y, yty)]
       (yty, Var y) | y `notElem` ns -> return [(y, yty)]
-      (TyCon s1, TyCon s2) | s1 == s2 -> return []
-      (DataCon type1 ctor1, DataCon type2 ctor2) | type1 == type2 && ctor1 == ctor2 -> return []
+      (DataType s1, DataType s2) | s1 == s2 -> return []
+      (Ctor type1 ctor1, Ctor type2 ctor2) | type1 == type2 && ctor1 == ctor2 -> return []
       (Lam bind1, Lam bind2) -> do
         (var, body1, _, body2) <- lift $ Unbound.unbind2Plus bind1 bind2
         unify (var:ns) body1 body2

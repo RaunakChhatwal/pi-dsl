@@ -12,7 +12,7 @@ import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.String.Interpolate (i)
 import Control.Monad.Trans (lift)
 
-reduceTyPi :: (Type, Unbound.Bind TName Type) -> Term -> TcMonad Type
+reduceTyPi :: (Type, Unbound.Bind TermName Type) -> Term -> TcMonad Type
 reduceTyPi (paramType, returnType) arg = do
   checkType arg paramType
   return $ Unbound.instantiate returnType [arg]
@@ -41,9 +41,9 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
     checkType a tyA
     return tyA
 
-  TyCon typeName -> fst <$> Env.lookupDataType typeName
+  DataType typeName -> fst <$> Env.lookupDataType typeName
 
-  DataCon typeName ctorName -> Env.lookupCtor (typeName, ctorName)
+  Ctor typeName ctorName -> Env.lookupCtor (typeName, ctorName)
 
   _ -> Env.err [DS "Need a type annotation for", DD term]
 
@@ -72,13 +72,13 @@ unfoldPi (Pi paramType bind) paramTypes = do
   unfoldPi returnType (paramType : paramTypes)
 unfoldPi returnType paramTypes = return (reverse paramTypes, returnType)
 
-checkCtorReturnsSelf :: CtorName -> TypeName -> Type -> TcMonad ()
-checkCtorReturnsSelf _ self (TyCon typeName) | typeName == self = return ()
+checkCtorReturnsSelf :: CtorName -> DataTypeName -> Type -> TcMonad ()
+checkCtorReturnsSelf _ self (DataType typeName) | typeName == self = return ()
 checkCtorReturnsSelf ctorName self (App typeCtor _) = checkCtorReturnsSelf ctorName self typeCtor
 checkCtorReturnsSelf ctorName self _ =
   Env.err [DS "Constructor", DD ctorName, DS "must return", DD self]
 
-throwIfFound :: TypeName -> Type -> TcMonad ()
+throwIfFound :: DataTypeName -> Type -> TcMonad ()
 throwIfFound typeName type' = Equal.whnf type' >>= \case
   TyType -> return ()
   Var _ -> return ()
@@ -92,11 +92,11 @@ throwIfFound typeName type' = Equal.whnf type' >>= \case
     throwIfFound typeName returnType
   Ann term _ -> throwIfFound typeName term
   TrustMe -> return ()
-  TyCon name -> when (name == typeName) $
+  DataType name -> when (name == typeName) $
     Env.err [DS "Invalid occurence of data type", DD typeName, DS "being declared"]
-  DataCon _ _ -> return ()
+  Ctor _ _ -> return ()
 
-checkStrictPositivity :: TypeName -> Type -> TcMonad ()
+checkStrictPositivity :: DataTypeName -> Type -> TcMonad ()
 checkStrictPositivity self paramType = Equal.whnf paramType >>= \case
   App a b -> do
     throwIfFound self b

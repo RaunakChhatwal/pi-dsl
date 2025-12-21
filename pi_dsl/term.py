@@ -5,7 +5,7 @@ import functools
 from typing import cast, Self
 from .base import init_tuple, Int, List, String, Tuple
 from . import bindings
-from .bindings import bind, Entry, Name, TName
+from .bindings import bind, Entry, Name, TermName
 
 class Term(ABC):
     @abstractmethod
@@ -48,7 +48,7 @@ class Var(Term):
     def binding(self) -> bindings.Term:
         return bindings.Term.init_var(self.name_binding())
 
-    def name_binding(self) -> TName:
+    def name_binding(self) -> TermName:
         return Name[bindings.Term].init_fn(String(self.name), Int(0))
 
 hole = Var("_")
@@ -70,7 +70,7 @@ class Ctor(Term):
     returnType: Type
 
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_data_con(String(self.name), String(self.datatype.name))
+        return bindings.Term.init_ctor(String(self.name), String(self.datatype.name))
 
     def signature_binding(self) -> bindings.Type:
         return Pi(self.params, self.returnType).binding()
@@ -82,7 +82,7 @@ class DataType(Term):
     ctors: list[Ctor]
 
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_ty_con(String(self.name))
+        return bindings.Term.init_data_type(String(self.name))
 
     def entry_binding(self) -> Entry:
         ctor_defs = List[Tuple[String, bindings.Type]](

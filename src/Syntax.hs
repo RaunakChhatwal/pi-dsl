@@ -2,13 +2,12 @@ module Syntax where
 
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
-import Data.Typeable (Typeable)
 import GHC.Generics (Generic, from)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 
 import Data.Function (on)
 
-type TName = Unbound.Name Term
+type TermName = Unbound.Name Term
 
 -- | Because types and terms use the same AST, we define the following
 -- type synonym so that we can hint whether a piece of syntax is being used
@@ -20,47 +19,34 @@ data Term
   = -- | type of types, concretely `Type`
     TyType
   | -- | variable `x`
-    Var TName
+    Var TermName
   | -- | abstraction  `\x. a`
-    Lam (Unbound.Bind TName Term)
+    Lam (Unbound.Bind TermName Term)
   | -- | application `a b`
     App Term Term
   | -- | function type `(x : A) -> B`
-    Pi Type (Unbound.Bind TName Type)
+    Pi Type (Unbound.Bind TermName Type)
   | -- | annotated terms `( a : A )`
     Ann Term Type
   | -- | an axiom 'TRUSTME', inhabits all types
     TrustMe
   | -- | type constructors (fully applied)
-    TyCon TypeName
+    DataType DataTypeName
   | -- | term constructors (fully applied)
-    DataCon TypeName CtorName
+    Ctor DataTypeName CtorName
   deriving (Show, Generic)
 
 -- | A 'Match' represents a case alternative
 newtype Match = Match (Unbound.Bind Pattern Term)
   deriving (Show, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
-data Pattern = PatVar TName | PatCon TypeName [Pattern]
-  deriving (Show, Eq, Generic, Typeable, Unbound.Alpha, Unbound.Subst Term)
+data Pattern = PatVar TermName | PatCon DataTypeName [Pattern]
+  deriving (Show, Eq, Generic, Unbound.Alpha, Unbound.Subst Term)
 
--- | Entries are the components of modules
-data Entry = Decl TName Type Term | Data TypeName Type [(CtorName, Type)]
-  deriving (Show, Generic, Typeable) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
-
-type TypeName = String
+type DataTypeName = String
 type CtorName = String
-
--- | Is this the syntax of a literal (natural) number
-isNumeral :: Term -> Maybe Int
-isNumeral (DataCon "Nat" "zero") = Just 0
-isNumeral (App (DataCon "Nat" "succ") predTerm) | Just pred <- isNumeral predTerm = Just (pred + 1)
-isNumeral _ = Nothing
-
--- | Remove source positions and type annotations from the top level of a term
-strip :: Term -> Term
-strip (Ann tm _) = strip tm
-strip tm = tm
+data Entry = Decl TermName Type Term | Data DataTypeName Type [(CtorName, Type)]
+  deriving (Show, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
 -- * `Alpha` class instances
 
@@ -74,7 +60,9 @@ strip tm = tm
 
 instance Unbound.Alpha Term where
   aeq' :: Unbound.AlphaCtx -> Term -> Term -> Bool
-  aeq' ctx a b = (Unbound.gaeq ctx `on` from) (strip a) (strip b)
+  aeq' ctx a b = (Unbound.gaeq ctx `on` from) (strip a) (strip b) where
+    strip (Ann term _) = strip term
+    strip term = term
 
 ---------------
 

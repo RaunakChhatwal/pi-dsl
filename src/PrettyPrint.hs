@@ -261,8 +261,7 @@ levelArrow :: Int
 levelArrow   = 5
 
 withPrec :: MonadReader DispInfo m => Int -> m a -> m a
-withPrec p t =
-  local (\d -> d { prec = p }) t
+withPrec p = local (\d -> d { prec = p })
 
 parens :: Bool -> Doc -> Doc
 parens b = if b then PP.parens else id
@@ -309,9 +308,8 @@ instance Display Term where
       else display a
   display TrustMe = do
     return $ PP.text "TRUSTME"
-  display t | Just i <- isNumeral t = display i
-  display (TyCon typeName) = display typeName
-  display (DataCon typeName ctorName) = display @String [i|#{typeName}.#{ctorName}|]
+  display (DataType typeName) = display typeName
+  display (Ctor typeName ctorName) = display @String [i|#{typeName}.#{ctorName}|]
 
 instance Display Match where
   display (Match bd) =

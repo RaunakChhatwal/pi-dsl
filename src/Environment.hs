@@ -43,9 +43,9 @@ traceTcMonad = go [] where
     Right (Right (trace, rest)) -> go (trace : traces) rest
 
 data Env = Env {
-  datatypes :: Map TypeName (Type, [(CtorName, Type)]),
-  decls :: Map TName (Type, Term),
-  locals :: Map TName Type
+  datatypes :: Map DataTypeName (Type, [(CtorName, Type)]),
+  decls :: Map TermName (Type, Term),
+  locals :: Map TermName Type
 }
 
 justOr :: Disp e => [e] -> TcMonad (Maybe a) -> TcMonad a
@@ -53,35 +53,35 @@ justOr error m = m >>= \case
   Just a -> return a
   Nothing -> err error
 
-lookupDecl :: TName -> TcMonad (Maybe (Type, Term))
+lookupDecl :: TermName -> TcMonad (Maybe (Type, Term))
 lookupDecl var = asks (Map.lookup var . decls)
 
-lookupType :: TName -> TcMonad Type
+lookupType :: TermName -> TcMonad Type
 lookupType var = asks (Map.lookup var . decls &&& Map.lookup var . locals) >>= \case
   (_, Just type') -> return type'
   (Just (type', _), Nothing) -> return type'
   (Nothing, Nothing) -> err [DD var, DS "not found"]
 
-addLocal :: TName -> Type -> TcMonad a -> TcMonad a
+addLocal :: TermName -> Type -> TcMonad a -> TcMonad a
 addLocal var type' = local $ \env@(Env _ _ locals) -> env { locals = Map.insert var type' locals }
 
-addDataType :: TypeName -> Type -> [(CtorName, Type)] -> TcMonad a -> TcMonad a
+addDataType :: DataTypeName -> Type -> [(CtorName, Type)] -> TcMonad a -> TcMonad a
 addDataType name params ctors monad = asks (Map.lookup name . datatypes) >>= \case
   Nothing -> flip local monad $
     \env@(Env datatypes _ _) -> env { datatypes = Map.insert name (params, ctors) datatypes }
   Just _ -> err [DS "Name conflict when declaring data type", DD name]
 
-addDecl :: TName -> Type -> Term -> TcMonad a -> TcMonad a
+addDecl :: TermName -> Type -> Term -> TcMonad a -> TcMonad a
 addDecl var type' def monad = asks (Map.lookup var . decls) >>= \case
   Nothing -> flip local monad $
     \env@(Env _ decls _) -> env { decls = Map.insert var (type', def) decls }
   Just _ -> err [DS "Name conflict when declaring variable", DD var]
 
-lookupDataType :: TypeName -> TcMonad (Type, [(CtorName, Type)])
+lookupDataType :: DataTypeName -> TcMonad (Type, [(CtorName, Type)])
 lookupDataType typeName =
   justOr [DS "Data type", DD typeName, DS "not found"] $ asks (Map.lookup typeName . datatypes)
 
-lookupCtor :: (TypeName, CtorName) -> TcMonad Type
+lookupCtor :: (DataTypeName, CtorName) -> TcMonad Type
 lookupCtor (typeName, ctorName) = do
   (_, ctorDefs) <- lookupDataType typeName
   case lookup ctorName ctorDefs of
