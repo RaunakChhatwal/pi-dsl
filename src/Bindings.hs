@@ -17,8 +17,7 @@ import Control.Exception (assert)
 import Data.Char (toLower, isUpper, toUpper)
 import Control.Monad (zipWithM, join, replicateM)
 import Control.Arrow ((&&&))
-import Data.Bool (bool)
-import Data.Either (partitionEithers, fromRight)
+import Data.Either (fromRight, rights)
 import Data.Bifoldable (biList)
 
 destructureCtor :: TH.Con -> (TH.Name, [TH.Type])
@@ -187,26 +186,17 @@ genTypeAlias (TypeAlias typeName typeDef) = Just [i|#{typeName} = #{genTypeBindi
 genTypeAlias _ = Nothing
 
 genTaggedUnion :: Binding -> Maybe String
-genTaggedUnion (TaggedUnion name arity ctors) =
-  Just $ classDecl ++ nullaryCtorInstances where
+genTaggedUnion (TaggedUnion name arity ctors) = Just classDecl where
   classDecl = [i|class #{name}#{typeArgs}(TaggedUnion):|] ++ "\n" ++ indent classBody
-  classBody = intercalate "\n\n" $ [kindHint, kindDecls] ++ nullaryCtorHints ++ accessors
+  classBody = intercalate "\n\n" $ [kindHint, kindDecls] ++ accessors
   typeArgs = if arity == 0 then ""
     else [i|[#{intercalate ", " ["T" ++ show i | i <- [1..arity]]}]|]
 
-  nullaryCtorInstances = if null nullaryCtors then ""
-    else "\n\n" ++ intercalate "\n" (map nullaryCtorInstance nullaryCtors)
-  nullaryCtorInstance ctorName =
-    [i|#{name}.#{ctorName} = #{name}(#{name}.#{kindConstant ctorName})|]
-  nullaryCtorHints = maybeToList $ if null nullaryCtors then Nothing
-    else Just $ intercalate "\n" [[i|#{ctorName}: ClassVar[Self]|] | ctorName <- nullaryCtors]
-
   accessors =
-    concatMap (biList . (genInitMethod &&& genGetMethod) . second paramHints) unionFields
+    concatMap (biList . (genInitMethod &&& genGetMethod) . second paramHints) (rights ctors)
   paramHints fieldType = map genTypeBinding $ case unfoldApp fieldType of
     (Tuple, paramTypes) -> paramTypes
     _ -> [fieldType]
-  (nullaryCtors, unionFields) = partitionEithers ctors
   genGetMethod (name, [paramHint]) = intercalate "\n"
     [[i|def get_#{name}(self) -> #{paramHint}:|],
      [i|    assert self.kind == self.#{kindConstant name}|],
@@ -239,7 +229,7 @@ generateBindings bindings = intercalate "\n\n" (imports : classes ++ aliases ++ 
   functions = mapMaybe genFunction bindings
   imports = intercalate "\n"
     ["from __future__ import annotations",
-     "from typing import ClassVar, Literal, Self",
+     "from typing import Literal",
      "from .base import *"]
 
 alignOffsetUp :: Int -> Int -> Int

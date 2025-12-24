@@ -29,17 +29,17 @@ type TcMonad = Stream (Of Trace) (Unbound.FreshMT (ReaderT Env (Except Err)))
 instance Unbound.Fresh TcMonad where
   fresh = lift . Unbound.fresh
 
-runTcMonad :: TcMonad a -> Maybe String
+runTcMonad :: TcMonad a -> Either a String
 runTcMonad stream = fst $ traceTcMonad stream
 
 emptyEnv :: Env
 emptyEnv = Env Map.empty Map.empty Map.empty
 
-traceTcMonad :: TcMonad a -> (Maybe String, [Trace])
+traceTcMonad :: TcMonad a -> (Either a String, [Trace])
 traceTcMonad = go [] where
   go traces stream = case runExcept $ runReaderT (Unbound.runFreshMT $ S.next stream) emptyEnv of
-    Left error -> (Just $ ppr error, reverse traces)
-    Right (Left _) -> (Nothing, reverse traces)
+    Left error -> (Right $ ppr error, reverse traces)
+    Right (Left result) -> (Left result, reverse traces)
     Right (Right (trace, rest)) -> go (trace : traces) rest
 
 data Env = Env {

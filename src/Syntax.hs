@@ -34,6 +34,7 @@ data Term
     DataType DataTypeName
   | -- | term constructors (fully applied)
     Ctor DataTypeName CtorName
+  | Rec DataTypeName -- recursors
   deriving (Show, Generic)
 
 -- | A 'Match' represents a case alternative

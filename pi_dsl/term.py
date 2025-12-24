@@ -5,12 +5,15 @@ import functools
 from typing import cast, Self
 from .base import init_tuple, Int, List, String, Tuple
 from . import bindings
-from .bindings import bind, Entry, Name, TermName
+from .bindings import bind, Entry, Name, ppr_term, TermName
 
 class Term(ABC):
     @abstractmethod
     def binding(self) -> bindings.Term:
         pass
+
+    def __str__(self) -> str:
+        return str(ppr_term(self.binding()))
 
     def union(self) -> TermUnion:
         return cast(TermUnion, self)
@@ -54,6 +57,7 @@ class Var(Term):
 hole = Var("_")
 
 type Param = Type | tuple[Var, Type]
+# type Param = tuple[Var, Type]
 
 def raw_param(param: Param) -> tuple[Var, Type]:
     match param:
@@ -70,7 +74,7 @@ class Ctor(Term):
     returnType: Type
 
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_ctor(String(self.name), String(self.datatype.name))
+        return bindings.Term.init_ctor(String(self.datatype.name), String(self.name))
 
     def signature_binding(self) -> bindings.Type:
         return Pi(self.params, self.returnType).binding()
@@ -124,9 +128,16 @@ class Pi(Term):
             binding = bindings.Term.init_pi(param_type.binding(), bind(var.name_binding(), binding))
         return binding
 
+@dataclass
+class Rec(Term):
+    datatype: DataType
+
+    def binding(self) -> bindings.Term:
+        return bindings.Term.init_rec(String(self.datatype.name))
+
 class UniverseSingleton(Term):
     def binding(self) -> bindings.Term:
-        return bindings.Term.ty_type
+        return bindings.Term(bindings.Term.KIND_TY_TYPE)
 
 Universe = UniverseSingleton()
 

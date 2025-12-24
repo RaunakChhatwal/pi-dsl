@@ -5,18 +5,20 @@ module Export where
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
 import Bindings (implStorable, alignOffsetUp, buildDeclOrder, sizeOf, alignment, exportFunction)
-import Syntax(Entry(Data, Decl), Term, TName)
+import Syntax(Entry(Data, Decl), Term, TermName, Type)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)
 import Data.Functor ((<&>))
 import Data.String.Interpolate (i)
 import PrettyPrint (ppr)
 import Environment (Env, Err, runTcMonad, TcMonad, Trace, traceTcMonad)
-import TypeCheck (checkType, inferType, tcEntries)
+import TypeCheck (checkType, inferType, tcEntries, withEntries)
 import Control.Monad (join, foldM_, void)
 import qualified Environment as Env
 import Control.Monad.Trans (liftIO)
 import Data.List (intercalate)
+import Data.Bifunctor (first)
+import Unbound.Generics.LocallyNameless.Unsafe (unsafeUnbind)
 
 instance F.Storable Integer where
   alignment _ = alignment @Int
@@ -66,16 +68,38 @@ $(catMaybes <$> (mapM implStorable =<< buildDeclOrder ''Env))
 $(pure . fromJust <$> implStorable ''Entry)
 
 $(join $ exportFunction "bind"
-  <$> sequence [[t|TName|], [t|Term|]]
-  <*> [t|Unbound.Bind TName Term|]
+  <$> sequence [[t|TermName|], [t|Term|]]
+  <*> [t|Unbound.Bind TermName Term|]
   <*> [| \var body -> return (Unbound.bind var body) |])
+
+$(join $ exportFunction "unbind"
+  <$> sequence [[t|Unbound.Bind TermName Term|]]
+  <*> [t| (TermName, Term) |]
+  <*> [| return . unsafeUnbind |])
 
 $(join $ exportFunction "ppr_term" <$> sequence [[t|Term|]] <*> [t|String|] <*> [| return . ppr |])
 
+eitherToMaybe :: Either () String -> Maybe String
+eitherToMaybe (Left _) = Nothing
+eitherToMaybe (Right error) = Just error
+
 $(join $ exportFunction "type_check"
-  <$> sequence [[t| [Entry] |]] <*> [t| Maybe String |] <*> [| return . runTcMonad . tcEntries |])
+  <$> sequence [[t| [Entry] |]]
+  <*> [t| Maybe String |]
+  <*> [| return . eitherToMaybe . runTcMonad . tcEntries |])
 
 $(join $ exportFunction "trace_type_check"
     <$> sequence [[t| [Entry] |]]
     <*> [t| (Maybe String, [Trace]) |]
-    <*> [| return . traceTcMonad . tcEntries |])
+    <*> [| return . first eitherToMaybe . traceTcMonad . tcEntries |])
+
+$(join $ exportFunction "infer_type"
+  <$> sequence [[t| [Entry] |], [t|Term|]]
+  <*> [t| Either Type String |]
+  <*> [| \entries term -> return . runTcMonad $ withEntries entries (inferType term) |])
+
+$(join $ exportFunction "check_type"
+  <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]]
+  <*> [t| Maybe String |]
+  <*> [| \entries term type' ->
+    return . eitherToMaybe . runTcMonad $ withEntries entries (checkType term type') |])

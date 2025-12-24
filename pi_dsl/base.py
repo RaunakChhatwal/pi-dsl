@@ -37,6 +37,9 @@ class TaggedUnion(Structure):
         return type(cls.__name__, (cls,), { "type_ctor": cls, "type_args": type_args })
 
     def concretize_type_hint(self, hint: Any) -> type:
+        if hint is String:
+            return hint     # HACK: prevent returning List[Char] for String
+
         if not hasattr(self, "type_args"):
             assert isinstance(hint, type)
             return hint
@@ -104,8 +107,11 @@ class String(List[Char]):
     def __init__(self, string: str):
         super().__init__(*[Char(ord(char)) for char in string])
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         return "".join([chr(int(code_point)) for code_point in super().get()])
+
+    def __repr__(self) -> str:
+        return self.__str__()
 
 Bool = ctypes.c_bool
 Int = ctypes.c_int64

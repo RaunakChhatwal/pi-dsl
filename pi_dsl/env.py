@@ -1,23 +1,115 @@
+from __future__ import annotations
 from dataclasses import dataclass
 from .base import *
 from . import bindings
-from .bindings import Maybe
-from .term import DataType, Term, Type, Var
+from .bindings import Either, Entry, Maybe, unbind
+from .term import Ann, App, DataType, Lam, Pi, Rec, Term, Type, Universe, Var
 
 @dataclass
 class Decl:
-    name: Var
+    var: Var
     signature: Type
     body: Term
 
     def entry_binding(self) -> bindings.Entry:
         return bindings.Entry.init_decl(
-            self.name.name_binding(), self.signature.binding(), self.body.binding())
+            self.var.name_binding(), self.signature.binding(), self.body.binding())
 
-type Entry = Decl | DataType
+def binding_to_term(binding: bindings.Term, env: Env) -> Term:
+    match binding.kind:
+        case bindings.Term.KIND_TY_TYPE:
+            return Universe
 
-def type_check(entries: list[Entry]):
-    entry_bindings = [entry.entry_binding() for entry in entries]
-    error = bindings.type_check(List[bindings.Entry](*entry_bindings))
-    if error.kind == Maybe.KIND_JUST:
-        raise TypeError(error.get_just())
+        case bindings.Term.KIND_VAR:
+            return Var(str(binding.get_var().get_fn()[0]))
+
+        case bindings.Term.KIND_LAM:
+            var, body = unbind(binding.get_lam()).get()
+            return Lam(Var(str(var.get_fn()[0])), binding_to_term(body, env))
+
+        case bindings.Term.KIND_APP:
+            func, arg = binding.get_app()
+            return App(binding_to_term(func, env), binding_to_term(arg, env))
+
+        case bindings.Term.KIND_PI:
+            param_type, bind = binding.get_pi()
+            param_name, return_type = unbind(bind).get()
+            param = (Var(str(param_name.get_fn()[0])), binding_to_term(param_type, env))
+            return Pi(param, binding_to_term(return_type, env))
+
+        case bindings.Term.KIND_ANN:
+            term, hint = binding.get_ann()
+            return Ann(binding_to_term(term, env), binding_to_term(hint, env))
+
+        case bindings.Term.KIND_TRUST_ME:
+            raise NotImplementedError()
+
+        case bindings.Term.KIND_DATA_TYPE:
+            return env.datatypes[str(binding.get_data_type())]
+
+        case bindings.Term.KIND_CTOR:
+            type_name, ctor_name = binding.get_ctor()
+            data_type = env.datatypes[str(type_name)]
+            return [ctor for ctor in data_type.ctors if ctor.name == str(ctor_name)][0]
+
+        case bindings.Term.KIND_REC:
+            return Rec(env.datatypes[str(binding.get_rec())])
+
+class Env:
+    datatypes: dict[str, DataType]
+    decls: dict[str, Decl]
+    entries: list[str]
+
+    def __init__(self, *entries: DataType | Decl):
+        self.datatypes = {}
+        self.decls = {}
+        self.entries = []
+
+        for entry in entries:
+            match entry:
+                case DataType():
+                    self.add_datatype(entry)
+                case Decl():
+                    self.declare(entry)
+
+    def add_datatype(self, datatype: DataType):
+        assert datatype.name not in self.entries
+        self.entries.append(datatype.name)
+        self.datatypes[datatype.name] = datatype
+        self.type_check()
+
+    def declare(self, decl: Decl):
+        assert decl.var.name not in self.entries
+        self.entries.append(decl.var.name)
+        self.decls[decl.var.name] = decl
+        self.type_check()
+
+    def get_entry(self, name: str) -> DataType | Decl:
+        if name in self.datatypes:
+            return self.datatypes[name]
+        elif name in self.decls:
+            return self.decls[name]
+        else:
+            raise ValueError(f"No entry with name {name}")
+
+    def entry_bindings(self) -> list[Entry]:
+        return [self.get_entry(entry).entry_binding() for entry in self.entries]
+
+    def type_check(self):
+        error = bindings.type_check(List[bindings.Entry](*self.entry_bindings()))
+        if error.kind == Maybe.KIND_JUST:
+            raise TypeError(error.get_just())
+
+    def infer_type(self, term: Term) -> Term:
+        either = bindings.infer_type(List[bindings.Entry](*self.entry_bindings()), term.binding())
+        match either.kind:
+            case Either.KIND_LEFT:
+                return binding_to_term(either.get_left(), self)
+            case Either.KIND_RIGHT:
+                raise TypeError(either.get_right())
+
+    def check_type(self, term: Term, type_: Type):
+        error = bindings.check_type(
+            List[bindings.Entry](*self.entry_bindings()), term.binding(), type_.binding())
+        if error.kind == Maybe.KIND_JUST:
+            raise TypeError(error.get_just())

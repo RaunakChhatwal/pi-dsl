@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import ClassVar, Literal, Self
+from typing import Literal
 from .base import *
 
 class Maybe[T1](TaggedUnion):
@@ -8,8 +8,6 @@ class Maybe[T1](TaggedUnion):
     KIND_NOTHING = 0
     KIND_JUST = 1
     
-    nothing: ClassVar[Self]
-    
     @classmethod
     def init_just(cls, value: T1):
         return cls(cls.KIND_JUST, value)
@@ -17,8 +15,6 @@ class Maybe[T1](TaggedUnion):
     def get_just(self) -> T1:
         assert self.kind == self.KIND_JUST
         return self.get_field(T1)
-
-Maybe.nothing = Maybe(Maybe.KIND_NOTHING)
 
 class Either[T1, T2](TaggedUnion):
     kind: Literal[0, 1]
@@ -79,8 +75,6 @@ class Map[T1, T2](TaggedUnion):
     KIND_BIN = 0
     KIND_TIP = 1
     
-    tip: ClassVar[Self]
-    
     @classmethod
     def init_bin(cls, *values: *tuple[Size, T1, T2, Map[T1, T2], Map[T1, T2]]):
         return cls(cls.KIND_BIN, init_tuple(*values))
@@ -88,8 +82,6 @@ class Map[T1, T2](TaggedUnion):
     def get_bin(self) -> tuple[Size, T1, T2, Map[T1, T2], Map[T1, T2]]:
         assert self.kind == self.KIND_BIN
         return self.get_field(Tuple[Size, T1, T2, Map[T1, T2], Map[T1, T2]]).get()
-
-Map.tip = Map(Map.KIND_TIP)
 
 class Name[T1](TaggedUnion):
     kind: Literal[0, 1]
@@ -127,7 +119,7 @@ class Bind[T1, T2](TaggedUnion):
         return self.get_field(Tuple[T1, T2]).get()
 
 class Term(TaggedUnion):
-    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8]
+    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     
     KIND_TY_TYPE = 0
     KIND_VAR = 1
@@ -138,9 +130,7 @@ class Term(TaggedUnion):
     KIND_TRUST_ME = 6
     KIND_DATA_TYPE = 7
     KIND_CTOR = 8
-    
-    ty_type: ClassVar[Self]
-    trust_me: ClassVar[Self]
+    KIND_REC = 9
     
     @classmethod
     def init_var(cls, value: TermName):
@@ -197,9 +187,14 @@ class Term(TaggedUnion):
     def get_ctor(self) -> tuple[DataTypeName, CtorName]:
         assert self.kind == self.KIND_CTOR
         return self.get_field(Tuple[DataTypeName, CtorName]).get()
-
-Term.ty_type = Term(Term.KIND_TY_TYPE)
-Term.trust_me = Term(Term.KIND_TRUST_ME)
+    
+    @classmethod
+    def init_rec(cls, value: DataTypeName):
+        return cls(cls.KIND_REC, value)
+    
+    def get_rec(self) -> DataTypeName:
+        assert self.kind == self.KIND_REC
+        return self.get_field(DataTypeName)
 
 class Env(TaggedUnion):
     kind: Literal[0]
@@ -250,6 +245,10 @@ set_export_signature("bind", [TermName, Term], Bind[TermName, Term])
 def bind(var: TermName, body: Term) -> Bind[TermName, Term]:
     return call_export("bind", [var, body])
 
+set_export_signature("unbind", [Bind[TermName, Term]], Tuple[TermName, Term])
+def unbind(binding: Bind[TermName, Term]) -> Tuple[TermName, Term]:
+    return call_export("unbind", [binding])
+
 set_export_signature("ppr_term", [Term], String)
 def ppr_term(term: Term) -> String:
     return call_export("ppr_term", [term])
@@ -261,3 +260,11 @@ def type_check(entries: List[Entry]) -> Maybe[String]:
 set_export_signature("trace_type_check", [List[Entry]], Tuple[Maybe[String], List[Trace]])
 def trace_type_check(entries: List[Entry]) -> Tuple[Maybe[String], List[Trace]]:
     return call_export("trace_type_check", [entries])
+
+set_export_signature("infer_type", [List[Entry], Term], Either[Type, String])
+def infer_type(entries: List[Entry], term: Term) -> Either[Type, String]:
+    return call_export("infer_type", [entries, term])
+
+set_export_signature("check_type", [List[Entry], Term, Type], Maybe[String])
+def check_type(entries: List[Entry], term: Term, type: Type) -> Maybe[String]:
+    return call_export("check_type", [entries, term, type])

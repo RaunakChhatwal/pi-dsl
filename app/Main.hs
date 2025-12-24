@@ -18,6 +18,12 @@ main = putStrLn $(do
     <$> sequence [[t| [Entry] |]] <*> [t| Maybe String |]
   traceTypeCheck <- functionBinding "trace_type_check" ["entries"]
     <$> sequence [[t| [Entry] |]] <*> [t| (Maybe String, [Trace]) |]
+  inferType <- functionBinding "infer_type" ["entries", "term"]
+    <$> sequence [[t| [Entry] |], [t|Term|]] <*> [t| Either Type String |]
+  checkType <- functionBinding "check_type" ["entries", "term", "type"]
+    <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]] <*> [t| Maybe String |]
+  unbind <- functionBinding "unbind" ["binding"]
+    <$> sequence [[t|Unbound.Bind TermName Term|]] <*> [t| (TermName, Term) |]
   let stringify = TH.LitE . TH.StringL
-  let functionBindings = [bind, pprTerm, typeCheck, traceTypeCheck]
+  let functionBindings = [bind, unbind, pprTerm, typeCheck, traceTypeCheck, inferType, checkType]
   return $ stringify $ generateBindings (bindings ++ functionBindings))
