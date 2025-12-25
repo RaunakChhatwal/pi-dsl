@@ -15,6 +15,8 @@ import Unbound.Generics.LocallyNameless.Internal.Fold (toListOf)
 
 import Syntax
 import Data.String.Interpolate (i)
+import Control.Monad (forM)
+import Data.Bifunctor (first)
 
 -------------------------------------------------------------------------
 
@@ -274,6 +276,16 @@ instance Display (Unbound.Name Term) where
     b <- ask showLongNames
     return (if b then debugDisp n else disp n)
 
+unfoldPi :: (Unbound.LFresh m) => Type -> m ([(TermName, Type)], Type)
+unfoldPi (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) ->
+  first ((paramName, paramType) :) <$> unfoldPi returnType
+unfoldPi returnType = return ([], returnType)
+
+unfoldApp :: Term -> (Term, [Term])
+unfoldApp term = go term []
+  where
+    go (App f x) args = go f (x : args)
+    go f args = (f, args)
 
 instance Display Term where
   display TyType = return $ PP.text "Type"
@@ -281,24 +293,23 @@ instance Display Term where
   display a@(Lam b) = do
     n <- ask prec
     (binds, body) <- withPrec levelLam $ gatherBinders a
-    return $ parens (levelLam < n) $ PP.hang (PP.text "\\" PP.<> PP.sep binds PP.<> PP.text ".") 2 body
-  display (App f x) = do
+    return $ parens (levelLam < n) $ PP.hang (PP.text "\\" PP.<> PP.hsep binds PP.<> PP.text ".") 2 body
+  display app@(App f x) = do
     n <- ask prec
-    df <- withPrec levelApp (display f)
-    dx <- withPrec (levelApp+1) (display x)
-    return $ parens (levelApp < n) $ df <+> dx
-  display (Pi a bnd) = do
-    Unbound.lunbind bnd $ \(n, b) -> do
-      p <- ask prec
-      lhs <-
-            if n `elem` toListOf Unbound.fv b
-              then do
-                dn <- display n
-                da <- withPrec 0 (display a)
-                return $ PP.parens $ dn <+> PP.colon <+> da
-              else withPrec (levelArrow+1) (display a)
-      db <- withPrec levelPi (display b)
-      return $ parens (levelArrow < p) $ lhs <+> PP.text "->" <+> db
+    let (func, args) = unfoldApp app
+    df <- withPrec levelApp (display func)
+    dargs <- mapM (withPrec (levelApp+1) . display) args
+    return $ parens (levelApp < n) $ PP.hang df 2 (PP.sep dargs)
+  display piType@(Pi _ _) = do
+    precision <- ask prec
+    (params, returnType) <- unfoldPi piType
+    paramDocs <- forM params $ \(paramName, paramType) ->
+      if paramName `elem` toListOf Unbound.fv returnType
+        then fmap PP.parens $ (<+>) . (<+> PP.colon) <$> display paramName <*> display paramType
+        else withPrec (levelArrow + 1) (display paramType)
+    returnTypeDoc <- display returnType
+    return $ parens (levelArrow < precision) $ PP.sep $
+      head paramDocs : map (PP.text "->" <+>) (tail paramDocs ++ [returnTypeDoc])
   display (Ann a b) = do
     sa <- ask showAnnots
     if sa then do
@@ -310,6 +321,7 @@ instance Display Term where
     return $ PP.text "TRUSTME"
   display (DataType typeName) = display typeName
   display (Ctor typeName ctorName) = display @String [i|#{typeName}.#{ctorName}|]
+  display (Rec typeName) = display @String [i|#{typeName}.rec|]
 
 instance Display Match where
   display (Match bd) =

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from .base import *
-from . import bindings
+from . import bindings, tracing
 from .bindings import Either, Entry, Maybe, unbind
 from .term import Ann, App, DataType, Lam, Pi, Rec, Term, Type, Universe, Var
 
@@ -55,6 +55,12 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
         case bindings.Term.KIND_REC:
             return Rec(env.datatypes[str(binding.get_rec())])
 
+class KernelError(Exception):
+    def __init__(self, message: str, traces: list[tracing.TraceTree]):
+        self.message = message
+        self.traces = traces
+        super().__init__(message)
+
 class Env:
     datatypes: dict[str, DataType]
     decls: dict[str, Decl]
@@ -70,19 +76,29 @@ class Env:
                 case DataType():
                     self.add_datatype(entry)
                 case Decl():
-                    self.declare(entry)
+                    self.declare(entry.var, entry.signature, entry.body)
 
     def add_datatype(self, datatype: DataType):
         assert datatype.name not in self.entries
-        self.entries.append(datatype.name)
-        self.datatypes[datatype.name] = datatype
-        self.type_check()
+        try:
+            self.entries.append(datatype.name)
+            self.datatypes[datatype.name] = datatype
+            self.type_check()
+        except KernelError as error:
+            self.entries.pop()
+            self.datatypes.pop(datatype.name)
+            raise error
 
-    def declare(self, decl: Decl):
-        assert decl.var.name not in self.entries
-        self.entries.append(decl.var.name)
-        self.decls[decl.var.name] = decl
-        self.type_check()
+    def declare(self, var: Var, hint: Type, defn: Term):
+        assert var.name not in self.entries
+        try:
+            self.entries.append(var.name)
+            self.decls[var.name] = Decl(var, hint, defn)
+            self.type_check()
+        except KernelError as error:
+            self.entries.pop()
+            self.decls.pop(var.name)
+            raise error
 
     def get_entry(self, name: str) -> DataType | Decl:
         if name in self.datatypes:
@@ -96,9 +112,10 @@ class Env:
         return [self.get_entry(entry).entry_binding() for entry in self.entries]
 
     def type_check(self):
-        error = bindings.type_check(List[bindings.Entry](*self.entry_bindings()))
+        error, traces = \
+            bindings.trace_type_check(List[bindings.Entry](*self.entry_bindings())).get()
         if error.kind == Maybe.KIND_JUST:
-            raise TypeError(error.get_just())
+            raise KernelError(str(error.get_just()), tracing.from_bindings(traces.get()))
 
     def infer_type(self, term: Term) -> Term:
         either = bindings.infer_type(List[bindings.Entry](*self.entry_bindings()), term.binding())

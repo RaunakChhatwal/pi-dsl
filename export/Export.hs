@@ -5,7 +5,7 @@ module Export where
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
 import Bindings (implStorable, alignOffsetUp, buildDeclOrder, sizeOf, alignment, exportFunction)
-import Syntax(Entry(Data, Decl), Term, TermName, Type)
+import Syntax(Entry(Data, Decl), Term(TyType), TermName, Type)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)
 import Data.Functor ((<&>))
@@ -101,5 +101,6 @@ $(join $ exportFunction "infer_type"
 $(join $ exportFunction "check_type"
   <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]]
   <*> [t| Maybe String |]
-  <*> [| \entries term type' ->
-    return . eitherToMaybe . runTcMonad $ withEntries entries (checkType term type') |])
+  <*> [| \entries term type' -> do
+            return . eitherToMaybe . runTcMonad $ withEntries entries $
+              checkType type' TyType >> checkType term type' |])

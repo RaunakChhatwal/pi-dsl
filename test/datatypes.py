@@ -1,5 +1,5 @@
 from pi_dsl.term import Ctor, DataType, Pi, Rec, Universe, Var
-from pi_dsl.env import Env
+from pi_dsl.env import Env, KernelError
 
 env = Env()
 
@@ -47,7 +47,7 @@ try:
     Bad.ctors = [bad]
     Env(Bad)
     raise Exception("Bad data type type checked without errors")
-except TypeError:
+except KernelError:
     pass
 
 try:
@@ -56,5 +56,5 @@ try:
     Bad.ctors = [bad]
     Env(Bool, Bad)
     raise Exception("Bad data type type checked without errors")
-except TypeError:
+except KernelError:
     pass

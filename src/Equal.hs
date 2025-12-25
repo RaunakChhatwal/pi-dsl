@@ -1,87 +1,120 @@
-module Equal (whnf, equate, unify) where
+{-# HLINT ignore "Redundant <$>" #-}
+module Equal (whnf, equate, unfoldPi) where
 
 import Syntax
 import Environment (TcMonad)
-import PrettyPrint (D(DS, DD))
+import PrettyPrint (D(DS, DD), ppr)
 import qualified Environment as Env
 import qualified Unbound.Generics.LocallyNameless as Unbound
 
 import Control.Monad.Except (catchError)
-import Control.Monad (unless, zipWithM, zipWithM_)
+import Control.Monad (unless, zipWithM, zipWithM_, guard, (>=>))
 import Control.Monad.Trans (lift)
 import Control.Monad.Reader (asks)
 import qualified Data.Map as Map
+import Data.Bifunctor (second, first)
+import Control.Monad.Trans.Maybe (MaybeT (MaybeT), runMaybeT)
+import Data.Maybe (fromMaybe, fromJust)
+import Control.Applicative (empty)
+import Data.List (find, intercalate)
+import Data.Functor ((<&>))
+import Control.Exception (assert)
 
--- | compare two expressions for equality
--- first check if they are alpha equivalent then
--- if not, weak-head normalize and compare
--- throw an error if they cannot be matched up
+-- compare two expressions for equality, only accepts well typed arguments
 equate :: Term -> Term -> TcMonad ()
-equate t1 t2 | Unbound.aeq t1 t2 = return () 
-equate t1 t2 = do
-  n1 <- whnf t1  
-  n2 <- whnf t2
-  case (n1, n2) of 
-    (TyType, TyType) -> return ()
-    (Var x,  Var y) | x == y -> return ()
+equate term1 term2 = Env.traceM "equate" [ppr term1, ppr term2] (const "") $
+  liftA2 (,) (whnf term1) (whnf term2) >>= \case
     (Lam bind1, Lam bind2) -> do
       (var, body1, _, body2) <- lift $ Unbound.unbind2Plus bind1 bind2
       equate body1 body2
-    (App a1 a2, App b1 b2) ->
-      equate a1 b1 >> equate a2 b2
+    (Lam bind1, nf2) -> do
+      (var, body) <- lift $ Unbound.unbind bind1
+      equate body (App nf2 (Var var))
+    (nf1, Lam bind2) -> do
+      (var, body) <- lift $ Unbound.unbind bind2
+      equate (App nf1 (Var var)) body
+    (App func1 arg1, App func2 arg2) ->
+      equate func1 func2 >> equate arg1 arg2
     (Pi paramType1 bind1, Pi paramType2 bind2) -> do
       equate paramType1 paramType2
       (paramName, returnType1, _, returnType2) <- lift $ Unbound.unbind2Plus bind1 bind2
       equate returnType1 returnType2
-    (TrustMe, TrustMe) ->  return ()
-    (DataType c1, DataType c2) | c1 == c2 -> return ()
-    (Ctor type1 ctor1, Ctor type2 ctor2) | type1 == type2 && ctor1 == ctor2 -> return ()   
-    (_,_) -> Env.err [DS "Expected", DD n2,  DS "but found", DD n1]
+    (nf1, nf2) | Unbound.aeq nf1 nf2 -> return ()
+    (nf1, nf2) -> Env.err [DS "Expected", DD nf2,  DS "but found", DD nf1]
 
--------------------------------------------------------
--- | Convert a term to its weak-head normal form.
-whnf :: Term -> TcMonad Term  
+unfoldApps :: Term -> TcMonad (Term, [Term])
+unfoldApps term = second reverse <$> go term where
+  go (App func arg) = second (arg :) <$> go func
+  go term = return (term, [])
+
+unfoldPi :: Type -> TcMonad ([Type], Type)
+unfoldPi (Pi paramType bind) = do
+  (_, returnType) <- Unbound.unbind bind
+  first (paramType :) <$> unfoldPi returnType
+unfoldPi returnType = return ([], returnType)
+
+splitReducerArgs :: Int -> Int -> [Term] -> TcMonad (Maybe ([Term], ([Term], (Term, [Term]))))
+splitReducerArgs 0 0 (scrutinee : rest) = return $ Just ([], ([], (scrutinee, rest)))
+splitReducerArgs 0 m (arg : rest) = fmap (second $ first (arg:)) <$> splitReducerArgs 0 (m - 1) rest
+splitReducerArgs n m (arg : rest) = fmap (first (arg :)) <$> splitReducerArgs (n - 1) m rest
+splitReducerArgs _ _ _ = return Nothing
+
+hypothesisForParam :: DataTypeName -> [TermName] -> Term -> Term -> Type -> TcMonad (Maybe Term)
+hypothesisForParam typeName paramNames recursor ctorArg = Equal.whnf >=> \case
+  Pi paramType bind -> do
+    (paramName, returnType) <- Unbound.unbind bind
+    fmap (Lam  . Unbound.bind paramName) <$>
+      hypothesisForParam typeName (paramName : paramNames) recursor ctorArg returnType
+  App typeCtor _ -> hypothesisForParam typeName paramNames recursor ctorArg typeCtor
+  DataType name | name == typeName ->
+    return $ Just $ App recursor $ foldl App ctorArg $ map Var $ reverse paramNames
+  _ -> return Nothing
+
+argsForCase :: DataTypeName -> Term -> [Term] -> Type -> TcMonad [Term]
+argsForCase typeName recursor ctorArgs ctorType = (, ctorArgs) <$> Equal.whnf ctorType >>= \case
+  (Pi paramType bind, ctorArg:restCtorArgs) -> do
+    (_, returnType) <- Unbound.unbind bind
+    restArgs <- argsForCase typeName recursor restCtorArgs returnType
+    hypothesisForParam typeName [] recursor ctorArg paramType <&> \case
+      Nothing -> ctorArg : restArgs
+      Just hypothesis -> ctorArg : hypothesis : restArgs
+  (_, args) -> assert (null args) $ return []
+
+reduceRecursor :: DataTypeName -> [Term] -> TcMonad (Maybe Term)
+reduceRecursor _ [] = return Nothing
+reduceRecursor typeName (motive:args) =
+  Env.traceM "reduceRecursor" (typeName : ppr motive : map ppr args) ppr $ do
+  (typeSignature, ctors) <- Env.lookupDataType typeName
+  numTypeParams <- length . fst <$> unfoldPi typeSignature
+  splitReducerArgs (length ctors) numTypeParams args >>= \case
+    Nothing -> return Nothing
+    Just (cases, (typeArgs, (scrutinee, extraArgs))) -> whnf scrutinee >>= unfoldApps >>= \case
+      (Ctor scrutineeTypeName ctorName, ctorArgs) | scrutineeTypeName == typeName -> do
+        let recursor = foldl App (Rec typeName) $ motive : cases ++ typeArgs
+        let ((_, ctorType), case') = fromJust $ find ((ctorName ==) . fst . fst) (zip ctors cases)
+        caseArgs <- argsForCase typeName recursor ctorArgs ctorType
+        return $ Just $ foldl App case' $ caseArgs ++ extraArgs
+      _ -> return Nothing
+
+-- Convert a term to its weak-head normal form, only accepts well typed terms
+whnf :: Term -> TcMonad Term
 whnf (Var var) = Env.lookupDecl var >>= \case
   (Just (_, def)) -> whnf def
   _ -> return (Var var)
-        
-whnf (App t1 t2) = do
-  nf <- whnf t1 
-  case nf of 
-    (Lam bnd) -> do
-      whnf (Unbound.instantiate bnd [t2])
-    _ -> do
-      return (App nf t2)
+
+-- TODO: optimize this, fix redundant traversals
+whnf term@(App _ _) = do
+  (func, args) <- unfoldApps term
+  funcNF <- whnf func
+  case funcNF of
+    Lam bind -> whnf $ foldl App (Unbound.instantiate bind [head args]) (tail args)
+    Rec typeName -> reduceRecursor typeName args >>= \case
+      Nothing -> return $ foldl App funcNF args
+      Just reduced -> whnf reduced
+    _ | Unbound.aeq func funcNF -> return term
+    _ -> whnf $ foldl App funcNF args
 
 -- ignore/remove type annotations when normalizing  
-whnf (Ann tm _) = whnf tm  
+whnf (Ann term _) = whnf term  
 -- all other terms are already in WHNF, don't do anything special for them
-whnf tm = return tm
-
--- | 'Unify' the two terms, producing a list of definitions that 
--- must hold for the terms to be equal
--- If the terms are already equal, succeed with an empty list
--- If there is an obvious mismatch, fail with an error
--- If either term is "ambiguous" (i.e. neutral), give up and 
--- succeed with an empty list
-unify :: [TermName] -> Term -> Term -> TcMonad [(TermName, Term)]
-unify ns tx ty = do
-  txnf <- whnf tx
-  tynf <- whnf ty
-  if Unbound.aeq txnf tynf
-    then return []
-    else case (txnf, tynf) of
-      (Var x, Var y) | x == y -> return []
-      (Var y, yty) | y `notElem` ns -> return [(y, yty)]
-      (yty, Var y) | y `notElem` ns -> return [(y, yty)]
-      (DataType s1, DataType s2) | s1 == s2 -> return []
-      (Ctor type1 ctor1, Ctor type2 ctor2) | type1 == type2 && ctor1 == ctor2 -> return []
-      (Lam bind1, Lam bind2) -> do
-        (var, body1, _, body2) <- lift $ Unbound.unbind2Plus bind1 bind2
-        unify (var:ns) body1 body2
-      (Pi paramType1 bind1, Pi paramType2 bind2) -> do
-        (paramName, returnType1, _, returnType2) <- lift $ Unbound.unbind2Plus bind1 bind2
-        (++) <$> unify ns paramType1 paramType2 <*> unify (paramName : ns) returnType1 returnType2
-      (App _ _, _) -> return []
-      (_, App _ _) -> return []
-      _ -> Env.err [DS "Cannot equate", DD txnf, DS "and", DD tynf]
+whnf term = return term

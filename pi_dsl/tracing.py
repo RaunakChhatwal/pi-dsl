@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Optional
 from . import bindings
-from .env import *
 
 @dataclass
 class Trace:
@@ -10,6 +11,22 @@ class Trace:
     events: list[str]
     result: Optional[str]
 
+
+def truncate(string: str) -> str:
+    truncated = False
+    if "\n" in string:
+        string = string.split("\n")[0]
+        truncated = True
+
+    if len(string) > 35:
+        string = string[:35]
+        truncated = True
+
+    if truncated:
+        string += "..."
+
+    return string
+
 @dataclass
 class TraceTree:
     trace: Trace
@@ -17,15 +34,25 @@ class TraceTree:
     size: int
 
     def __str__(self):
-        def truncate(string: str) -> str:
-            return string.split("\n")[0] + "..." if "\n" in string else string
-
-        string = f"{self.trace.func}({", ".join(map(truncate, self.trace.args))})"
+        args = ", ".join([f"`{truncate(arg)}`" for arg in self.trace.args])
+        string = f"{self.trace.func}({args})"
         if result := self.trace.result:
             string += f" -> {truncate(result)}"
         if children := self.children:
             string += f" [{len(children)} children, {self.size} total nodes]"
         return string
+
+    def stack_trace(self) -> list[TraceTree]:
+        traces: list[TraceTree] = []
+        curr = self
+        while curr.trace.result is None:
+            traces.append(curr)
+            if len(curr.children) > 0:
+                curr = curr.children[-1]
+            else:
+                break
+
+        return traces
 
     __repr__ = __str__
 
@@ -36,34 +63,28 @@ def from_bindings(traces: list[bindings.Trace]) -> list[TraceTree]:
     for trace in traces:
         match trace.kind:
             case bindings.Trace.KIND_INVOC:
-                func, args = trace.get_invoc()
-                tree = TraceTree(Trace(str(func), [str(arg) for arg in args.get()], [], None), [], 1)
-                
-                if stack:
-                    stack[-1].children.append(tree)
-                    # TODO: replace with post order traversal
-                    for ancestor in stack:
-                        ancestor.size += 1
-                else:
-                    trees.append(tree)
-                stack.append(tree)
+                pass
 
             case bindings.Trace.KIND_EVENT:
                 stack[-1].trace.events.append(str(trace.get_event()))
+                continue
 
             case bindings.Trace.KIND_RESULT:
                 stack[-1].trace.result = str(trace.get_result())
                 stack.pop()
+                continue
+
+        
+        func, args = trace.get_invoc()
+        tree = TraceTree(Trace(str(func), [str(arg) for arg in args.get()], [], None), [], 1)
+        
+        if stack:
+            stack[-1].children.append(tree)
+            # TODO: replace with post order traversal
+            for ancestor in stack:
+                ancestor.size += 1
+        else:
+            trees.append(tree)
+        stack.append(tree)
 
     return trees
-
-def trace_type_check(entries: list[Entry]) -> tuple[Optional[str], list[TraceTree]]:
-    entry_bindings = [entry.entry_binding() for entry in entries]
-    (error, trace_bindings) = \
-        bindings.trace_type_check(List[bindings.Entry](*entry_bindings)).get()
-    traces = from_bindings(trace_bindings.get())
-    match error.kind:
-        case Maybe.KIND_NOTHING:
-            return (None, traces)
-        case Maybe.KIND_JUST:
-            return (str(error.get_just()), traces)

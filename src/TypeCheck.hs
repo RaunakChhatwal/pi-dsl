@@ -11,6 +11,7 @@ import Text.PrettyPrint.HughesPJ (($$), render)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.String.Interpolate (i)
 import Control.Monad.Trans (lift)
+import Data.Functor ((<&>))
 
 hole :: TermName
 hole = Unbound.string2Name "_"
@@ -54,9 +55,9 @@ recursorCaseFromCtor ctorName typeName ctorApplied = Equal.whnf >=> \case
   (Pi paramType bind) -> do
     (paramName, returnType) <- Unbound.unbind bind
     rest <- recursorCaseFromCtor ctorName typeName (App ctorApplied $ Var paramName) returnType
-    motiveFromCtorParam typeName [] [] paramName paramType >>= \case
-      Nothing -> return $ addParam (paramName, paramType) rest
-      Just motive -> return $ addParam (paramName, paramType) $ addParam (hole, motive) rest
+    motiveFromCtorParam typeName [] [] paramName paramType <&> \case
+      Nothing -> addParam (paramName, paramType) rest
+      Just motive -> addParam (paramName, paramType) $ addParam (hole, motive) rest
   returnType -> motiveFromCtorReturnType ctorApplied [] returnType
 
 motiveFromSelf :: DataTypeName -> [TermName] -> Type -> TcMonad Type
@@ -91,22 +92,28 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
         return $ Unbound.instantiate bind [arg]
       _ -> Env.err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
 
-  Ann a tyA -> do
-    checkType tyA TyType
-    checkType a tyA
-    return tyA
+  Ann term type' -> do
+    checkType type' TyType
+    checkType term type'
+    return type'
 
-  DataType typeName -> fst <$> Env.lookupDataType typeName
+  DataType typeName -> do
+    typeSignature <- fst <$> Env.lookupDataType typeName
+    checkType typeSignature TyType
+    return typeSignature
 
-  Ctor typeName ctorName -> Env.lookupCtor (typeName, ctorName)
+  Ctor typeName ctorName -> do
+    ctorType <- Env.lookupCtor (typeName, ctorName)
+    checkType ctorType TyType
+    return ctorType
 
   Rec typeName -> do
     (signature, ctorDefs) <- Env.lookupDataType typeName
     motiveType <- motiveFromTypeSignature typeName [] signature
     cases <- forM ctorDefs $ \(ctorName, ctorType) ->
       recursorCaseFromCtor ctorName typeName (Ctor typeName ctorName) ctorType
-    addParam (motive, motiveType) <$> (foldr (addParam . (hole,))
-      <$> motiveFromSelf typeName [] signature <*> pure cases)
+    addParam (motive, motiveType) <$>
+      (foldr (addParam . (hole,)) <$> motiveFromSelf typeName [] signature <*> pure cases)
 
   _ -> Env.err [DS "Need a type annotation for", DD term]
 
@@ -124,13 +131,7 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
 
     TrustMe -> return ()
 
-    _ -> Equal.equate type' =<< inferType term
-
-unfoldPi :: Type -> [Type] -> TcMonad ([Type], Type)
-unfoldPi (Pi paramType bind) paramTypes = do
-  (_, returnType) <- Unbound.unbind bind
-  unfoldPi returnType (paramType : paramTypes)
-unfoldPi returnType paramTypes = return (reverse paramTypes, returnType)
+    _ -> flip Equal.equate type' =<< inferType term
 
 checkCtorReturnsSelf :: CtorName -> DataTypeName -> Type -> TcMonad ()
 checkCtorReturnsSelf _ self (DataType typeName) | typeName == self = return ()
@@ -180,7 +181,7 @@ tcEntry entry = traceM "tcEntry" [ppr entry] (const "") $ case entry of
     checkType typeParams TyType
     forM_ ctors $ \(ctorName, ctorType) -> do
       Env.addDataType typeName typeParams [] $ checkType ctorType TyType
-      (paramTypes, returnType) <- unfoldPi ctorType []
+      (paramTypes, returnType) <- Equal.unfoldPi ctorType
       checkCtorReturnsSelf ctorName typeName =<< Equal.whnf returnType
       mapM (checkStrictPositivity typeName) paramTypes
 
