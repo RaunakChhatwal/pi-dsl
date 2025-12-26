@@ -80,22 +80,22 @@ class Env:
 
     def add_datatype(self, datatype: DataType):
         assert datatype.name not in self.entries
+        self.entries.append(datatype.name)
+        self.datatypes[datatype.name] = datatype
         try:
-            self.entries.append(datatype.name)
-            self.datatypes[datatype.name] = datatype
             self.type_check()
-        except KernelError as error:
+        except Exception as error:
             self.entries.pop()
             self.datatypes.pop(datatype.name)
             raise error
 
     def declare(self, var: Var, hint: Type, defn: Term):
         assert var.name not in self.entries
+        self.entries.append(var.name)
+        self.decls[var.name] = Decl(var, hint, defn)
         try:
-            self.entries.append(var.name)
-            self.decls[var.name] = Decl(var, hint, defn)
             self.type_check()
-        except KernelError as error:
+        except Exception as error:
             self.entries.pop()
             self.decls.pop(var.name)
             raise error

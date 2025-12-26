@@ -1,5 +1,5 @@
 from __future__ import annotations
-from abc import ABC, abstractmethod
+
 from dataclasses import dataclass
 import functools
 from typing import cast, Self
@@ -7,10 +7,9 @@ from .base import init_tuple, Int, List, String, Tuple
 from . import bindings
 from .bindings import bind, Entry, Name, ppr_term, TermName
 
-class Term(ABC):
-    @abstractmethod
+class Term():
     def binding(self) -> bindings.Term:
-        pass
+        raise NotImplemented
 
     def __str__(self) -> str:
         return str(ppr_term(self.binding()))
@@ -71,13 +70,13 @@ class Ctor(Term):
     name: str
     datatype: DataType
     params: list[Param]
-    returnType: Type
+    return_type: Type
 
     def binding(self) -> bindings.Term:
         return bindings.Term.init_ctor(String(self.datatype.name), String(self.name))
 
     def signature_binding(self) -> bindings.Type:
-        return Pi(self.params, self.returnType).binding()
+        return Pi(self.params, self.return_type).binding()
 
 @dataclass
 class DataType(Term):
