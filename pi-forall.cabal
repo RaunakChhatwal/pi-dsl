@@ -57,12 +57,13 @@ library
   import: shared-properties
   hs-source-dirs: src
   exposed-modules: 
+    Bindings
     Environment
     Equal
+    Inductive
     PrettyPrint
     Syntax
     TypeCheck
-    Bindings
   
 executable pi-forall
   import: shared-properties
