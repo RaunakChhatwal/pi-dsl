@@ -14,21 +14,23 @@ class Nat(metaclass=DataTypeMeta):
     zero: Ctor = ctor([], Self)
     succ: Ctor = ctor([(Var("n"), Self)], Self)
 
-@decl(env, Pi([Nat, Nat], Nat))
+@decl(env, Nat >> (Nat >> Nat))
 def add(n: Var, m: Var) -> Term:
     return Rec(Nat)(lam(lambda _: Nat), m, lam(lambda _: Nat.succ), n)
+
+Term.__add__ = lambda self, other: add(self, other)
 
 T, a, b = Var("T"), Var("a"), Var("b")
 @datatype(env, type_params=[(T, Universe), (a, T), (b, T)])
 class Eq(metaclass=DataTypeMeta):
     refl: Ctor = ctor([(T, Universe), (a, T)], Self(T, a, a))
 
-@decl(env, Pi([(T, Universe), (a, T), (b, T), Eq(T, a, b)], Eq(T, b, a)))
+@decl(env, (T, Universe) >> ((a, T) >> ((b, T) >> (Eq(T, a, b) >> Eq(T, b, a)))))
 def sym() -> Term:
     motive = lam(lambda T, a, b, _: Eq(T, b, a))
     return Rec(Eq)(motive, Eq.refl)
 
-c, h = Var("c"), Var("h")
+c = Var("c")
 @decl(env, Pi([(T, Universe), (a, T), (b, T), (c, T), Eq(T, a, b), Eq(T, b, c)], Eq(T, a, c)))
 def trans(T: Var, a: Var, b: Var, c: Var, h1: Var, h2: Var) -> Term:
     motive = lam(lambda T, a, b, _: Pi([(c, T), Eq(T, b, c)], Eq(T, a, c)))

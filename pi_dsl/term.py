@@ -25,6 +25,14 @@ class Term():
     def __call__(self, *args: Term) -> Term:
         return functools.reduce(App, args, self)
 
+    def __rshift__(self, other: Term) -> Term:
+        return Pi(self, other)
+
+    def __rrshift__(self, other: Param) -> Term:
+        return Pi(other, self)
+
+    def __add__(self, other: Term) -> Term: ...
+
 type Type = Term
 
 @dataclass
