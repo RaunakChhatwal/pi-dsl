@@ -135,8 +135,9 @@ instance Display [Entry] where
 
 
 instance Display Entry where
-  display (Decl var hint def) = foldl1 (<+>) <$> sequence
-    [display var, pure $ PP.text ":", display hint, pure $ PP.text "=", display def]
+  display (Decl var hint def) = PP.hang <$> decl <*> pure 2 <*> display def where
+    decl = foldl1 (<+>) <$> sequence
+      [display var, pure $ PP.text ":", display hint, pure $ PP.text "="]
   display (Data n params constructors) = do
     dn <- display n
     dp <- display params
@@ -144,13 +145,7 @@ instance Display Entry where
       dcn <- display ctorName
       dct <- display ctorType
       pure $ dcn <+> PP.text ":" <+> dct) constructors
-    pure $ PP.hang
-      ( PP.text "data" <+> dn <+> PP.text ":"
-          <+> dp
-          <+> PP.text "where"
-      )
-      2
-      (PP.vcat dc)
+    pure $ PP.hang (PP.text "data" <+> dn <+> PP.text ":" <+> dp <+> PP.text "where") 2 (PP.vcat dc)
 
 
 

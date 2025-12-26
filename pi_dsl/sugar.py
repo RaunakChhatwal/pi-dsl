@@ -1,4 +1,5 @@
-from typing import Any
+import inspect
+from typing import Any, Callable
 from . import bindings
 from .env import Env
 from .term import *
@@ -78,3 +79,19 @@ def ctor(params: list[Param], return_type: Type) -> Ctor:
     ctor.params = params
     ctor.return_type = return_type
     return ctor
+
+
+# def lam(func: Callable[..., Term]) -> Term:
+#     params = inspect.signature(func).parameters
+#     vars = [Var(param) for param in params.keys()]
+#     return Lam(vars, func(*vars))
+
+def decl(env: Env, signature: Type):
+    def decorator(func: Callable[..., Term]) -> Term:
+        var = Var(func.__name__)
+        param_vars = inspect.signature(func).parameters
+        param_vars = [Var(var) for var in param_vars.keys()]
+        env.declare(var, signature, Lam(param_vars, func(*param_vars)))
+        return var
+
+    return decorator

@@ -1,13 +1,11 @@
 module TypeCheck where
 
-import Control.Monad.Except (catchError, throwError)
 import Control.Monad.Trans (lift)
-import Text.PrettyPrint.HughesPJ (($$), render)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Environment (TcMonad, traceM)
 import Environment qualified as Env
 import Equal (equate, whnf)
-import PrettyPrint (D(DS, DD), Disp (disp), ppr)
+import PrettyPrint (D(DS, DD), ppr)
 import Syntax (Entry(Data, Decl), Term(..), Type)
 import Inductive (checkDataTypeDecl, synthesizeRecursorType, unfoldPi)
 
@@ -69,11 +67,9 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
 
 tcEntry :: Entry -> TcMonad ()
 tcEntry entry = traceM "tcEntry" [ppr entry] (const "") $ case entry of
-  Decl var hint term -> Env.lookupDecl var >>= \case
+  Decl var type' term -> Env.lookupDecl var >>= \case
     Just _ -> Env.err [DD var, DS "already defined"]
-    Nothing -> checkType term hint `catchError` handler where
-      handler (Env.Err msg) = throwError $ Env.Err (msg $$ msg')
-      msg' = disp [DS "When checking the term", DD term, DS "against the type", DD hint]
+    Nothing -> checkType type' TyType >> checkType term type'
   dataDecl@(Data typeName typeParams ctors) -> checkDataTypeDecl typeName typeParams ctors
 
 withEntries :: [Entry] -> TcMonad a -> TcMonad a
