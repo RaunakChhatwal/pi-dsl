@@ -1,0 +1,9 @@
+{
+  "include": ["pi_dsl", "test"],
+//   "exclude": [".venv", "**/__pycache__", "build", "dist"],
+  "typeCheckingMode": "strict",
+  "reportUnknownLambdaType": "none",
+  "reportUnknownArgumentType": "none"
+//   "pythonVersion": "3.12"
+}
+

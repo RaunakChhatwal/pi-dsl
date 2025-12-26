@@ -81,17 +81,15 @@ def ctor(params: list[Param], return_type: Type) -> Ctor:
     return ctor
 
 
-# def lam(func: Callable[..., Term]) -> Term:
-#     params = inspect.signature(func).parameters
-#     vars = [Var(param) for param in params.keys()]
-#     return Lam(vars, func(*vars))
+def lam(func: Callable[..., Term]) -> Term:
+    sig_params = inspect.signature(func).parameters
+    param_vars: list[Var] = [Var(name) for name in sig_params.keys()]
+    return Lam(param_vars, func(*param_vars))
 
 def decl(env: Env, signature: Type):
     def decorator(func: Callable[..., Term]) -> Term:
         var = Var(func.__name__)
-        param_vars = inspect.signature(func).parameters
-        param_vars = [Var(var) for var in param_vars.keys()]
-        env.declare(var, signature, Lam(param_vars, func(*param_vars)))
+        env.declare(var, signature, lam(func))
         return var
 
     return decorator
