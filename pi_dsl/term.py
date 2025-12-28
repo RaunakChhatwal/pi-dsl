@@ -5,7 +5,12 @@ import functools
 from typing import cast, Self
 from .base import init_tuple, Int, List, String, Tuple
 from . import bindings
-from .bindings import bind, Entry, Name, ppr_term, TermName
+from .bindings import bind, Entry, ppr_term, TermName
+
+@dataclass
+class Hint:
+    cls: type
+    hint: Type
 
 class Term():
     def binding(self) -> bindings.Term:
@@ -25,13 +30,17 @@ class Term():
     def __call__(self, *args: Term) -> Term:
         return functools.reduce(App, args, self)
 
+    def __class_getitem__(cls, hint: Type) -> Hint:
+        return Hint(cls, hint)
+
     def __rshift__(self, other: Term) -> Term:
         return Pi(self, other)
 
     def __rrshift__(self, other: Param) -> Term:
         return Pi(other, self)
 
-    def __add__(self, other: Term) -> Term: ...
+    def __add__(self, other: Term) -> Term:
+        return Var("add")(self, other)
 
 type Type = Term
 
@@ -59,7 +68,9 @@ class Var(Term):
         return bindings.Term.init_var(self.name_binding())
 
     def name_binding(self) -> TermName:
-        return Name[bindings.Term].init_fn(String(self.name), Int(0))
+        return bindings.Name[bindings.Term].init_fn(String(self.name), Int(0))
+
+# type Name = str | Var
 
 hole = Var("_")
 
@@ -77,14 +88,13 @@ def raw_param(param: Param) -> tuple[Var, Type]:
 class Ctor(Term):
     name: str
     datatype: DataType
-    params: list[Param]
-    return_type: Type
+    signature: Type
 
     def binding(self) -> bindings.Term:
         return bindings.Term.init_ctor(String(self.datatype.name), String(self.name))
 
-    def signature_binding(self) -> bindings.Type:
-        return Pi(self.params, self.return_type).binding()
+    # def signature_binding(self) -> bindings.Type:
+    #     return Pi(self.params, self.return_type).binding()
 
 @dataclass
 class DataType(Term):
@@ -97,7 +107,7 @@ class DataType(Term):
 
     def entry_binding(self) -> Entry:
         ctor_defs = List[Tuple[String, bindings.Type]](
-            *[init_tuple(String(ctor.name), ctor.signature_binding()) for ctor in self.ctors])
+            *[init_tuple(String(ctor.name), ctor.signature.binding()) for ctor in self.ctors])
         return bindings.Entry.init_data(
             String(self.name), Pi(self.params, Universe).binding(), ctor_defs)
 

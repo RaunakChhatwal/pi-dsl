@@ -32,11 +32,10 @@ def remove_stub(term: Term, self: DataType) -> Term:
             return App(remove_stub(body, self), remove_stub(hint, self))
         case App(func, arg):
             return App(remove_stub(func, self), remove_stub(arg, self))
-        case Ctor(name, DataType(type_name, type_params, ctors), params, return_type):
+        case Ctor(name, DataType(type_name, type_params, ctors), signature):
             type_params = [remove_stub_from_param(param, self) for param in type_params]
             datatype = DataType(type_name, type_params, ctors)
-            params = [remove_stub_from_param(param, self) for param in params]
-            return Ctor(name, datatype, params, remove_stub(return_type, self))
+            return Ctor(name, datatype, remove_stub(signature, self))
         case Lam(vars, body):
             return Lam(vars, remove_stub(body, self))
         case Pi(params, return_type):
@@ -59,14 +58,12 @@ def datatype(env: Env, type_params: list[Param] = []):
         cls.ctors = []
 
         for class_var, hint in cls.__dict__.get("__annotations__", {}).items():
-            if hint is not Ctor:
+            if not isinstance(hint, Hint):
                 continue
 
-            ctor = getattr(cls, class_var)
-            ctor.name = class_var
-            ctor.datatype = cls
-            ctor.params = [remove_stub_from_param(param, cls) for param in ctor.params]
-            ctor.return_type = remove_stub(ctor.return_type, cls)
+            assert hint.cls is Ctor
+            ctor = Ctor(class_var, cls, remove_stub(hint.hint, cls))
+            setattr(cls, class_var, ctor)
             cls.ctors.append(ctor)
 
         env.add_datatype(cls)
@@ -74,22 +71,22 @@ def datatype(env: Env, type_params: list[Param] = []):
 
     return decorator
 
-def ctor(params: list[Param], return_type: Type) -> Ctor:
-    ctor = Ctor.__new__(Ctor)
-    ctor.params = params
-    ctor.return_type = return_type
-    return ctor
-
-
 def lam(func: Callable[..., Term]) -> Term:
-    sig_params = inspect.signature(func).parameters
-    param_vars: list[Var] = [Var(name) for name in sig_params.keys()]
+    params = inspect.signature(func).parameters
+    param_vars: list[Var] = [Var(name) for name in params.keys()]
     return Lam(param_vars, func(*param_vars))
 
-def decl(env: Env, signature: Type):
+def decl(env: Env):
     def decorator(func: Callable[..., Term]) -> Term:
+        signature_ = inspect.signature(func)
+        params: list[Param] = \
+            [(Var(name), param.annotation.hint) for name, param in signature_.parameters.items()]
+        signature = Pi(params, signature_.return_annotation.hint)
+
         var = Var(func.__name__)
         env.declare(var, signature, lam(func))
         return var
 
     return decorator
+
+# TODO: support member functions for data types and dot notation for datatype variables

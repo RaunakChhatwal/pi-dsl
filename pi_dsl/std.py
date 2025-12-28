@@ -1,44 +1,46 @@
-from .term import Ctor, Param, Pi, Rec, Term, Universe, Var
+from .term import Ctor, Pi, Rec, Term, Universe, Var
 from .env import Env
-from .sugar import ctor, datatype, decl, DataTypeMeta, lam, Self
+from .sugar import datatype, decl, DataTypeMeta, lam, Self
 
 env = Env()
 
 @datatype(env)
 class Bool(metaclass=DataTypeMeta):
-    false: Ctor = ctor([], Self)
-    true: Ctor = ctor([], Self)
+    false: Ctor[Self]
+    true: Ctor[Self]
 
+n = Var("n")
 @datatype(env)
 class Nat(metaclass=DataTypeMeta):
-    zero: Ctor = ctor([], Self)
-    succ: Ctor = ctor([(Var("n"), Self)], Self)
+    zero: Ctor[Self]
+    succ: Ctor[(n, Self) >> Self]
 
-@decl(env, Nat >> (Nat >> Nat))
-def add(n: Var, m: Var) -> Term:
+@decl(env)
+def add(n: Var[Nat], m: Var[Nat]) -> Term[Nat]:
     return Rec(Nat)(lam(lambda _: Nat), m, lam(lambda _: Nat.succ), n)
-
-Term.__add__ = lambda self, other: add(self, other)
 
 T, a, b = Var("T"), Var("a"), Var("b")
 @datatype(env, type_params=[(T, Universe), (a, T), (b, T)])
 class Eq(metaclass=DataTypeMeta):
-    refl: Ctor = ctor([(T, Universe), (a, T)], Self(T, a, a))
+    refl: Ctor[(T, Universe) >> ((a, T) >> Self(T, a, a))]
 
-@decl(env, (T, Universe) >> ((a, T) >> ((b, T) >> (Eq(T, a, b) >> Eq(T, b, a)))))
-def sym() -> Term:
+@decl(env)
+def sym(T: Var[Universe], a: Var[T], b: Var[T], h: Var[Eq(T, a, b)]) -> Term[Eq(T, b, a)]:
     motive = lam(lambda T, a, b, _: Eq(T, b, a))
-    return Rec(Eq)(motive, Eq.refl)
+    return Rec(Eq)(motive, Eq.refl, T, a, b, h)
 
 c = Var("c")
-@decl(env, Pi([(T, Universe), (a, T), (b, T), (c, T), Eq(T, a, b), Eq(T, b, c)], Eq(T, a, c)))
-def trans(T: Var, a: Var, b: Var, c: Var, h1: Var, h2: Var) -> Term:
+@decl(env)
+def trans(
+    T: Var[Universe], a: Var[T], b: Var[T], c: Var[T], h1: Var[Eq(T, a, b)], h2: Var[Eq(T, b, c)]
+) -> Term[Eq(T, a, c)]:
     motive = lam(lambda T, a, b, _: Pi([(c, T), Eq(T, b, c)], Eq(T, a, c)))
     return Rec(Eq)(motive, lam(lambda T, a, c, h: h))(T, a, b, h1, c, h2)
 
 U, f = Var("U"), Var("f")
-params: list[Param] = [(T, Universe), (U, Universe), (f, Pi(T, U)), (a, T), (b, T), Eq(T, a, b)]
-@decl(env, Pi(params, Eq(U, f(a), f(b))))
-def cong(T: Var, U: Var, f: Var, a: Var, b: Var, h: Var) -> Term:
+@decl(env)
+def cong(
+    T: Var[Universe], U: Var[Universe], f: Var[T >> U], a: Var[T], b: Var[T], h: Var[Eq(T, a, b)]
+) -> Term[Eq(U, f(a), f(b))]:
     motive = lam(lambda T, a, b, _: Eq(U, f(a), f(b)))
     return Rec(Eq)(motive, lam(lambda T, a: Eq.refl(U, f(a))))(T, a, b, h)

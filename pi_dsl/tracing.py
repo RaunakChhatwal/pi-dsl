@@ -42,10 +42,10 @@ class TraceTree:
             string += f" [{len(children)} children, {self.size} total nodes]"
         return string
 
-    def stack_trace(self) -> list[TraceTree]:
+    def stack_trace(self, only_pending: bool=True) -> list[TraceTree]:
         traces: list[TraceTree] = []
         curr = self
-        while curr.trace.result is None:
+        while (only_pending and curr.trace.result is None) or not only_pending:
             traces.append(curr)
             if len(curr.children) > 0:
                 curr = curr.children[-1]

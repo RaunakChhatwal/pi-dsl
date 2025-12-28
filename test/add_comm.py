@@ -4,8 +4,8 @@ from pi_dsl.sugar import decl, lam
 
 # n + 0 = n
 n = Var("n")
-@decl(env, (n, Nat) >> Eq(Nat, n + Nat.zero, n))
-def add_zero(n: Var) -> Term:
+@decl(env)
+def add_zero(n: Var[Nat]) -> Term[Eq(Nat, n + Nat.zero, n)]:
     motive = lam(lambda n: Eq(Nat, n + Nat.zero, n))
     base_case = Eq.refl(Nat, Nat.zero)
     inductive_case = lam(lambda pred, h: cong(Nat, Nat, Nat.succ, pred + Nat.zero, pred, h))
@@ -13,9 +13,8 @@ def add_zero(n: Var) -> Term:
 
 # n + m.succ = succ(n + m)
 m = Var("m")
-signature = (n, Nat) >> ((m, Nat) >> Eq(Nat, n + Nat.succ(m), Nat.succ(n + m)))
-@decl(env, signature)
-def add_succ(n: Var, m: Var) -> Term:
+@decl(env)
+def add_succ(n: Var[Nat], m: Var[Nat]) -> Term[Eq(Nat, n + Nat.succ(m), Nat.succ(n + m))]:
     motive = lam(lambda n: Eq(Nat, n + Nat.succ(m), Nat.succ(n + m)))
     base_case = Eq.refl(Nat, Nat.succ(m))
     inductive_case = lam(lambda pred, h:
@@ -23,9 +22,8 @@ def add_succ(n: Var, m: Var) -> Term:
     return Rec(Nat)(motive, base_case, inductive_case, n)
 
 # n + m = m + n
-signature = (n, Nat) >> ((m, Nat) >> Eq(Nat, n + m, m + n))
-@decl(env, signature)
-def add_comm(n: Var, m: Var) -> Term:
+@decl(env)
+def add_comm(n: Var[Nat], m: Var[Nat]) -> Term[Eq(Nat, n + m, m + n)]:
     motive = lam(lambda m: Eq(Nat, n + m, m + n))
     base_case = add_zero(n)
     inductive_case = lam(lambda m, h:

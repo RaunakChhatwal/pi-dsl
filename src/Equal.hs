@@ -31,23 +31,22 @@ equate term1 term2 = traceM "equate" [ppr term1, ppr term2] (const "") $
 
 -- Convert a term to its weak-head normal form, only accepts well typed terms
 whnf :: Term -> TcMonad Term
-whnf (Var var) = lookupDecl var >>= \case
-  (Just (_, def)) -> whnf def
-  _ -> return (Var var)
+whnf term = traceM "whnf" [ppr term] ppr $ case term of
+  Var var -> lookupDecl var >>= \case
+    Just (_, def) -> whnf def
+    _ -> return $ Var var
 
--- TODO: optimize this, fix redundant traversals
-whnf term@(App _ _) = do
-  (func, args) <- unfoldApps term
-  funcNF <- whnf func
-  case funcNF of
-    Lam bind -> whnf $ foldl App (Unbound.instantiate bind [head args]) (tail args)
-    Rec typeName -> reduceRecursor typeName args >>= \case
-      Nothing -> return $ foldl App funcNF args
-      Just reduced -> whnf reduced
-    _ | Unbound.aeq func funcNF -> return term
-    _ -> whnf $ foldl App funcNF args
+  term@(App _ _) -> do
+    (func, args) <- unfoldApps term
+    funcNF <- whnf func
+    case funcNF of
+      Lam bind -> whnf $ foldl App (Unbound.instantiate bind [head args]) (tail args)
+      Rec typeName -> reduceRecursor typeName args >>= \case
+        Nothing -> return $ foldl App funcNF args
+        Just reduced -> whnf reduced
+      _ | Unbound.aeq func funcNF -> return term
+      _ -> whnf $ foldl App funcNF args
 
--- ignore/remove type annotations when normalizing  
-whnf (Ann term _) = whnf term  
--- all other terms are already in WHNF, don't do anything special for them
-whnf term = return term
+  Ann term _ -> whnf term
+
+  term -> return term
