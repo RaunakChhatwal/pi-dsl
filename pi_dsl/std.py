@@ -1,4 +1,4 @@
-from .term import Ctor, Pi, Rec, Term, Universe, Var
+from .term import Ctor, Pi, Rec, Term, Set, Var
 from .env import Env
 from .sugar import datatype, decl, DataTypeMeta, lam, Self
 
@@ -20,27 +20,25 @@ def add(n: Var[Nat], m: Var[Nat]) -> Term[Nat]:
     return Rec(Nat)(lam(lambda _: Nat), m, lam(lambda _: Nat.succ), n)
 
 T, a, b = Var("T"), Var("a"), Var("b")
-@datatype(env, type_params=[(T, Universe), (a, T), (b, T)])
+@datatype(env, (T, Set) >> ((a, T) >> ((b, T) >> Set)))
 class Eq(metaclass=DataTypeMeta):
-    refl: Ctor[(T, Universe) >> ((a, T) >> Self(T, a, a))]
+    refl: Ctor[(T, Set) >> ((a, T) >> Self(T, a, a))]
 
 @decl(env)
-def sym(T: Var[Universe], a: Var[T], b: Var[T], h: Var[Eq(T, a, b)]) -> Term[Eq(T, b, a)]:
+def sym(T: Var[Set], a: Var[T], b: Var[T], h: Var[Eq(T, a, b)]) -> Term[Eq(T, b, a)]:
     motive = lam(lambda T, a, b, _: Eq(T, b, a))
     return Rec(Eq)(motive, Eq.refl, T, a, b, h)
 
 c = Var("c")
 @decl(env)
-def trans(
-    T: Var[Universe], a: Var[T], b: Var[T], c: Var[T], h1: Var[Eq(T, a, b)], h2: Var[Eq(T, b, c)]
+def trans(T: Var[Set], a: Var[T], b: Var[T], c: Var[T], h1: Var[Eq(T, a, b)], h2: Var[Eq(T, b, c)]
 ) -> Term[Eq(T, a, c)]:
     motive = lam(lambda T, a, b, _: Pi([(c, T), Eq(T, b, c)], Eq(T, a, c)))
     return Rec(Eq)(motive, lam(lambda T, a, c, h: h))(T, a, b, h1, c, h2)
 
 U, f = Var("U"), Var("f")
 @decl(env)
-def cong(
-    T: Var[Universe], U: Var[Universe], f: Var[T >> U], a: Var[T], b: Var[T], h: Var[Eq(T, a, b)]
+def cong(T: Var[Set], U: Var[Set], f: Var[T >> U], a: Var[T], b: Var[T], h: Var[Eq(T, a, b)]
 ) -> Term[Eq(U, f(a), f(b))]:
     motive = lam(lambda T, a, b, _: Eq(U, f(a), f(b)))
     return Rec(Eq)(motive, lam(lambda T, a: Eq.refl(U, f(a))))(T, a, b, h)

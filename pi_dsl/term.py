@@ -99,7 +99,7 @@ class Ctor(Term):
 @dataclass
 class DataType(Term):
     name: str
-    params: list[Param]
+    signature: Type
     ctors: list[Ctor]
 
     def binding(self) -> bindings.Term:
@@ -109,7 +109,7 @@ class DataType(Term):
         ctor_defs = List[Tuple[String, bindings.Type]](
             *[init_tuple(String(ctor.name), ctor.signature.binding()) for ctor in self.ctors])
         return bindings.Entry.init_data(
-            String(self.name), Pi(self.params, Universe).binding(), ctor_defs)
+            String(self.name), self.signature.binding(), ctor_defs)
 
 @dataclass
 class Lam(Term):
@@ -152,10 +152,17 @@ class Rec(Term):
     def binding(self) -> bindings.Term:
         return bindings.Term.init_rec(String(self.datatype.name))
 
-class UniverseSingleton(Term):
+@dataclass
+class Sort(Term):
+    level: int
+
     def binding(self) -> bindings.Term:
-        return bindings.Term(bindings.Term.KIND_TY_TYPE)
+        level_binding = bindings.Level(bindings.Level.KIND_ZERO)
+        assert self.level >= 0
+        for _ in range(self.level):
+            level_binding = bindings.Level.init_succ(level_binding)
+        return bindings.Term.init_sort(level_binding)
 
-Universe = UniverseSingleton()
+Set = Sort(0)
 
-type TermUnion = Ann | App | Ctor | DataType | Lam | Pi | UniverseSingleton | Var
+type TermUnion = Ann | App | Ctor | DataType | Lam | Pi | Sort | Var

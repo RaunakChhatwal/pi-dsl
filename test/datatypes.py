@@ -1,29 +1,29 @@
-from pi_dsl.term import Ctor, Pi, Rec, Universe, Var
+from pi_dsl.term import Ctor, Pi, Rec, Set, Sort, Var
 from pi_dsl.env import Env, KernelError
 from pi_dsl.std import Bool, env, Eq, Nat
 from pi_dsl.sugar import datatype, DataTypeMeta, Self
 
-env.check_type(env.infer_type(Rec(Bool)), Universe)
-env.check_type(env.infer_type(Rec(Nat)), Universe)
-env.check_type(env.infer_type(Rec(Eq)), Universe)
+env.check_type(env.infer_type(Rec(Bool)), Sort(1))
+env.check_type(env.infer_type(Rec(Nat)), Sort(1))
+env.check_type(env.infer_type(Rec(Eq)), Sort(1))
 
 # Finite types indexed by Nat
 n, m = Var("n"), Var("m")
-@datatype(env, type_params=[(n, Nat)])
+@datatype(env, Nat >> Set)
 class Fin(metaclass=DataTypeMeta):
     zero: Ctor[(n, Nat) >> Self(Nat.succ(n))]
     succ: Ctor[(n, Nat) >> ((m, Self(n)) >> Self(Nat.succ(n)))]
 
-env.check_type(env.infer_type(Rec(Fin)), Universe)
+env.check_type(env.infer_type(Rec(Fin)), Sort(1))
 
 # N-ary trees indexed by branching factor
 subtrees = Var("subtrees")
-@datatype(env, type_params=[(n, Nat)])
+@datatype(env, Nat >> Set)
 class NTree(metaclass=DataTypeMeta):
     leaf: Ctor[(n, Nat) >> Self(n)]
     node: Ctor[Pi([(n, Nat), (subtrees, (m, Fin(n)) >> Self(n))], Self(n))]
 
-env.check_type(env.infer_type(Rec(NTree)), Universe)
+env.check_type(env.infer_type(Rec(NTree)), Sort(1))
 
 try:
     @datatype(Env())

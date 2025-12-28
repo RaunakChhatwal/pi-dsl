@@ -13,7 +13,7 @@ import Environment (addDataType, err, lookupDataType, TcMonad, traceM)
 import {-# SOURCE #-} Equal (whnf)
 import PrettyPrint (D(DS, DD), ppr)
 import Syntax (CtorName, DataTypeName, Term(..), TermName, Type)
-import {-# SOURCE #-} TypeCheck (checkType)
+import {-# SOURCE #-} TypeCheck (checkType, ensureType)
 
 hole :: TermName
 hole = Unbound.string2Name "_"
@@ -26,9 +26,11 @@ motiveFromTypeSignature typeName paramNames (Pi paramType bind) = do
   (paramName, returnType) <- Unbound.unbind bind
   addParam (paramName, paramType) <$>
     motiveFromTypeSignature typeName (paramName : paramNames) returnType
-motiveFromTypeSignature typeName paramNames _ = do
-  let fullyApplied = foldl App (DataType typeName) $ map Var (reverse paramNames)
-  return $ addParam (hole, fullyApplied) TyType
+motiveFromTypeSignature typeName paramNames returnType = do
+  let fullyApplied = foldl App (DataType typeName) $ map Var $ reverse paramNames
+  whnf returnType >>= \case
+    Sort u -> return $ addParam (hole, fullyApplied) $ Sort u
+    _ -> err [DS "Expected data type signature to end in a Sort, but got", DD returnType]
 
 motive :: TermName
 motive = Unbound.string2Name "motive"
@@ -144,7 +146,7 @@ checkCtorReturnsSelf ctorName self _ =
 
 throwIfFound :: DataTypeName -> Type -> TcMonad ()
 throwIfFound typeName type' = whnf type' >>= \case
-  TyType -> return ()
+  Sort _ -> return ()
   Var _ -> return ()
   Lam bind -> do
     (_, body) <- Unbound.unbind bind
@@ -155,11 +157,11 @@ throwIfFound typeName type' = whnf type' >>= \case
     (_, returnType) <- Unbound.unbind bind
     throwIfFound typeName returnType
   Ann term _ -> throwIfFound typeName term
-  TrustMe -> return ()
   DataType name -> when (name == typeName) $
-    err [DS "Invalid occurence of data type", DD typeName, DS "being declared"]
+    err [DS "Invalid recursive occurrence of data type", DD typeName, DS "during declaration"]
   Ctor _ _ -> return ()
-  Rec _ -> return ()
+  Rec name -> when (name == typeName) $
+    err [DS "Recursor of", DD typeName, DS "not valid during its declaration"]
 
 checkStrictPositivity :: DataTypeName -> Type -> TcMonad ()
 checkStrictPositivity self paramType = whnf paramType >>= \case
@@ -173,10 +175,12 @@ checkStrictPositivity self paramType = whnf paramType >>= \case
   _ -> return ()
 
 checkDataTypeDecl :: DataTypeName -> Type -> [(CtorName, Type)] -> TcMonad ()
-checkDataTypeDecl typeName typeParams ctors = do
-  checkType typeParams TyType
+checkDataTypeDecl typeName typeSignature ctors = do
+  _ <- ensureType typeSignature
+  _ <- ensureType . snd =<< unfoldPi typeSignature
   forM_ ctors $ \(ctorName, ctorType) -> do
-    addDataType typeName typeParams [] $ checkType ctorType TyType
+    let message = "Unreachable: attempted access to data type definition during declaration"
+    _ <- addDataType typeName typeSignature (error message) $ ensureType ctorType
     (paramTypes, returnType) <- unfoldPi ctorType
     checkCtorReturnsSelf ctorName typeName =<< Equal.whnf returnType
     mapM (checkStrictPositivity typeName) paramTypes

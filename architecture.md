@@ -2,9 +2,7 @@
 
 ## Overview
 
-pi-dsl is a dependently typed domain-specific language (DSL) embedded in Python with a Haskell backend. This hybrid architecture combines Haskell's strong type system and formal verification capabilities with Python's accessibility and ecosystem.
-
-**Core Value Proposition**: Making dependent types accessible to Python developers while maintaining rigorous correctness guarantees through a Haskell-implemented type system.
+pi-dsl is a dependently typed DSL embedded in Python with a Haskell type-checking core. Goal: accessible dependent types in Python with rigorous checking in Haskell.
 
 ## High-Level Architecture
 
@@ -22,123 +20,52 @@ The Haskell implementation is based on the pi-forall language, a simple dependen
 
 #### Key Modules:
 
-- **`Syntax.hs`**: Defines the abstract syntax tree (AST) for the language:
-  - Core constructs: `TyType`, `Var`, `Lam`, `App`, `Pi`, `Ann`, `TrustMe`
-  - Inductive types: `DataType`, `Ctor`, `Rec`
-  - Pattern matching: `Match`, `Pattern`
-  - Uses `unbound-generics` library for binding management
+- **`Syntax.hs`**: AST (`Sort`, `Var`, `Lam`, `App`, `Pi`, `Ann`, `DataType`, `Ctor`, `Rec`); also defines `Match`/`Pattern` helpers (not a `Term` form)
+- **`TypeCheck.hs`**: Bidirectional checking (`inferType`, `checkType`, `tcEntries`)
+- **`Environment.hs`**: `TcMonad`, `Env` (datatypes/decls/locals), tracing, and pretty-printed `Err` (no source spans)
+- **`Inductive.hs`**: Inductive checking + recursor synthesis/reduction (positivity checking)
+- **`Equal.hs`**: Equality + WHNF reduction
+- **`PrettyPrint.hs`**: Pretty-printing
 
-- **`TypeCheck.hs`**: Implements bidirectional type checking:
-  - `inferType`: Synthesizes types for terms
-  - `checkType`: Verifies terms against expected types
-  - `tcEntries`: Type checks declarations and data types
-  - Bidirectional algorithm with type-directed checking
 
-- **`Environment.hs`**: Manages typing contexts and error handling:
-  - `TcMonad`: Reader monad transformer stack with environment, freshness, and error handling
-  - `Env`: Three-part environment (datatypes, declarations, locals)
-  - Tracing support for debugging and error reporting
-  - Comprehensive error reporting with source positions
-
-- **`Inductive.hs`**: Handles inductive types and recursion:
-  - `checkDataTypeDecl`: Validates data type declarations
-  - `synthesizeRecursorType`: Generates type signatures for recursors
-  - `reduceRecursor`: Implements pattern matching reduction
-  - Strict positivity checking for inductive definitions
-
-- **`Equal.hs`**: Implements equality checking and weak head normal form reduction
-
-- **`PrettyPrint.hs`**: Provides pretty-printing for terms and error messages
-
-#### Design Patterns in Haskell Core:
-
-- **Monadic Type Checking**: `TcMonad` combines reader, state (fresh names), and error monads
-- **Bidirectional Type Checking**: Separates type inference from type checking
-- **Locally Nameless Representation**: Uses `unbound-generics` for safe binding operations
-- **Streaming Traces**: Uses `streaming` package for efficient trace collection
 
 ### 2. Foreign Function Interface (FFI) Bridge
 
 #### `Export.hs` - Haskell Export Module:
-- Provides C-compatible function exports using `ForeignFunctionInterface`
-- Auto-generates `Storable` instances for Haskell types
-- Exports key functions: `bind`, `unbind`, `ppr_term`, `type_check`, `infer_type`, `check_type`
-- Manages Haskell runtime initialization (`pi_forall_init`)
+- Exposes FFI entry points: `bind`, `unbind`, `ppr_term`, `type_check`, `trace_type_check`, `infer_type`, `check_type`
+- Runtime init/exit lives in `export.c` (`pi_forall_init`/`pi_forall_exit`)
 
 #### `Bindings.hs` - Template Haskell Code Generation:
-- **Auto-generates Python bindings** from Haskell type definitions
-- Analyzes Haskell type definitions using Template Haskell
-- Generates Python class definitions with proper type parameters
-- Creates tagged union representations for Haskell algebraic data types
-- Handles recursive type dependencies through topological sorting
+- Generates Python `ctypes` bindings for selected Haskell types and exported functions
 
 ### 3. Python DSL Layer
 
-#### `base.py` - Low-Level C Integration:
-- Uses Python's `ctypes` library to call Haskell functions
-- Implements `TaggedUnion` base class for representing Haskell ADTs
-- Provides `List`, `Tuple`, `String` wrappers for Haskell types
-- Manages memory allocation and type conversions
+#### `base.py` / `bindings.py`:
+- `ctypes` bridge + generated tagged-union wrappers and function signatures for the Haskell exports
 
-#### `bindings.py` - Auto-generated Type Bindings:
-- Contains Python classes mirroring Haskell types: `Maybe`, `Either`, `Trace`, `Map`, `Name`, `Bind`, `Term`, `Env`, `Entry`
-- Each class provides:
-  - Kind discriminators for tagged unions
-  - Factory methods (`init_*`) for constructing values
-  - Accessor methods (`get_*`) for extracting values
-  - Type-safe function signatures for FFI calls
+#### `term.py`:
+- Python term constructors (`Ann`, `App`, `Ctor`, `DataType`, `Lam`, `Pi`, `Rec`, `Sort`, `Var`) with `binding()` → Haskell
 
-#### `term.py` - Abstract Syntax Tree Representation:
-- Python classes representing language terms: `Ann`, `App`, `Ctor`, `DataType`, `Lam`, `Pi`, `Rec`, `Var`
-- `Term` base class with `binding()` method to convert to Haskell representation
-- Type aliases: `Type = Term`, `Param = Type | tuple[Var, Type]`
-- Support for holes and partial applications
+#### `env.py` (+ `tracing.py`):
+- Incremental environment (`Env`, `Decl`) that calls the kernel and raises `KernelError` with trace trees
 
-#### `env.py` - Environment and Kernel Interface:
-- `Env` class manages the typing environment
-- `Decl` class represents declarations with type signatures and definitions
-- Provides high-level operations: `type_check()`, `infer_type()`, `check_type()`
-- Converts between Python term representations and Haskell bindings
-- Comprehensive error handling with trace collection
-
-#### `sugar.py` - Syntactic Sugar and Decorators:
-- `@datatype` decorator for defining inductive types
-- `@decl` decorator for defining functions with type signatures
-- `Self` singleton for representing recursive types in constructors
-- Automatic stub removal and term normalization
-- Pythonic interface for defining dependently typed programs
-
-#### `std.py` - Standard Library:
-- Predefined types: `Bool`, `Nat`, `Eq` (equality type)
-- Standard operations: `add`, `sym`, `trans`, `cong`
-- Demonstrates the DSL's capabilities for theorem proving
+#### `sugar.py` / `std.py`:
+- Decorators (`@datatype`, `@decl`), `Self` stub replacement, and a small standard library (`Bool`, `Nat`, `Eq`, `add`, `sym`, `trans`, `cong`)
 
 ### 4. Build and Development Infrastructure
 
-- **`pi-forall.cabal`**: Haskell package configuration with:
-  - Library (type system core)
-  - Executable (code generation tool)
-  - Foreign library (shared library for Python)
-- **`flake.nix`**: Nix development environment with Haskell and Python tools
-- **`pyproject.toml`**: Python package configuration
-- **Template Haskell**: Used in `app/Main.hs` to generate binding code
+- **`pi-forall.cabal`**: Haskell library + codegen executable + shared foreign library
+- **`flake.nix`**, **`pyproject.toml`**: dev environment and Python packaging
+- **`app/Main.hs`**: generates `pi_dsl/bindings.py`
 
 ## Data Flow and Interactions
 
 ### Type Checking Workflow:
 
-1. **User defines terms** using Python DSL syntax (decorators and classes)
-2. **Python constructs AST** using `term.py` classes
-3. **Conversion to Haskell** via `binding()` methods
-4. **FFI call** to Haskell type checker through `env.py` interface
-5. **Haskell performs type checking** using bidirectional algorithm
-6. **Results returned** to Python, with error messages or type information
-7. **Traces collected** for debugging and error reporting
+1. Build Python terms (`term.py`/`sugar.py`) and environment entries (`env.py`)
+2. Convert to Haskell via `binding()` and call the exported kernel
+3. Return either a type/result or an error plus traces (`tracing.py`)
 
 ### Binding Generation Process:
 
-1. **Template Haskell analysis** of Haskell type definitions
-2. **Dependency analysis** to determine declaration order
-3. **Python code generation** with proper type parameters
-4. **`Storable` instance generation** for FFI compatibility
-5. **Export function generation** for Haskell-Python interoperability
+1. Template Haskell inspects Haskell types and emits `pi_dsl/bindings.py` plus FFI glue (`Export.hs`)

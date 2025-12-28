@@ -6,21 +6,26 @@ import Environment (TcMonad, traceM)
 import Environment qualified as Env
 import Equal (equate, whnf)
 import PrettyPrint (D(DS, DD), ppr)
-import Syntax (Entry(Data, Decl), Term(..), Type)
+import Syntax (Entry(Data, Decl), Level(Succ), Term(..), Type, maxLevel)
 import Inductive (checkDataTypeDecl, synthesizeRecursorType, unfoldPi)
+
+ensureType :: Term -> TcMonad Level
+ensureType term = inferType term >>= \case
+  Sort u -> return u
+  type' -> Env.err [DS "Expected type but got", DD term, DS "with type", DD type']
 
 -- Infer/synthesize the type of a term
 inferType :: Term -> TcMonad Type
 inferType term = traceM "inferType" [ppr term] ppr $ case term of
   Var var -> Env.lookupType var
 
-  TyType -> return TyType
+  Sort level -> return $ Sort $ Succ level
 
   Pi paramType bind -> do
     (paramName, returnType) <- Unbound.unbind bind
-    checkType paramType TyType
-    Env.addLocal paramName paramType $ checkType returnType TyType
-    return TyType
+    paramSortLevel <- ensureType paramType
+    returnSortLevel <- Env.addLocal paramName paramType $ ensureType returnType
+    return $ Sort $ maxLevel paramSortLevel returnSortLevel
 
   App func arg -> do
     funcType <- inferType func
@@ -31,19 +36,13 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
       _ -> Env.err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
 
   Ann term type' -> do
-    checkType type' TyType
+    _ <- ensureType type'
     checkType term type'
     return type'
 
-  DataType typeName -> do
-    typeSignature <- fst <$> Env.lookupDataType typeName
-    checkType typeSignature TyType
-    return typeSignature
+  DataType typeName -> fst <$> Env.lookupDataType typeName
 
-  Ctor typeName ctorName -> do
-    ctorType <- Env.lookupCtor (typeName, ctorName)
-    checkType ctorType TyType
-    return ctorType
+  Ctor typeName ctorName -> Env.lookupCtor (typeName, ctorName)
 
   Rec typeName -> synthesizeRecursorType typeName
 
@@ -61,15 +60,13 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
         Env.addLocal var paramType $ checkType body returnType
       _ -> Env.err [DS "Lambda expression should have a function type, not", DD type']
 
-    TrustMe -> return ()
-
     _ -> flip equate type' =<< inferType term
 
 tcEntry :: Entry -> TcMonad ()
 tcEntry entry = traceM "tcEntry" [ppr entry] (const "") $ case entry of
   Decl var type' term -> Env.lookupDecl var >>= \case
     Just _ -> Env.err [DD var, DS "already defined"]
-    Nothing -> checkType type' TyType >> checkType term type'
+    Nothing -> ensureType type' >> checkType term type'
   dataDecl@(Data typeName typeParams ctors) -> checkDataTypeDecl typeName typeParams ctors
 
 withEntries :: [Entry] -> TcMonad a -> TcMonad a

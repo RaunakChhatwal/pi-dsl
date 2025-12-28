@@ -83,6 +83,20 @@ class Map[T1, T2](TaggedUnion):
         assert self.kind == self.KIND_BIN
         return self.get_field(Tuple[Size, T1, T2, Map[T1, T2], Map[T1, T2]]).get()
 
+class Level(TaggedUnion):
+    kind: Literal[0, 1]
+    
+    KIND_ZERO = 0
+    KIND_SUCC = 1
+    
+    @classmethod
+    def init_succ(cls, value: Level):
+        return cls(cls.KIND_SUCC, value)
+    
+    def get_succ(self) -> Level:
+        assert self.kind == self.KIND_SUCC
+        return self.get_field(Level)
+
 class Name[T1](TaggedUnion):
     kind: Literal[0, 1]
     
@@ -119,18 +133,25 @@ class Bind[T1, T2](TaggedUnion):
         return self.get_field(Tuple[T1, T2]).get()
 
 class Term(TaggedUnion):
-    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8]
     
-    KIND_TY_TYPE = 0
+    KIND_SORT = 0
     KIND_VAR = 1
     KIND_LAM = 2
     KIND_APP = 3
     KIND_PI = 4
     KIND_ANN = 5
-    KIND_TRUST_ME = 6
-    KIND_DATA_TYPE = 7
-    KIND_CTOR = 8
-    KIND_REC = 9
+    KIND_DATA_TYPE = 6
+    KIND_CTOR = 7
+    KIND_REC = 8
+    
+    @classmethod
+    def init_sort(cls, value: Level):
+        return cls(cls.KIND_SORT, value)
+    
+    def get_sort(self) -> Level:
+        assert self.kind == self.KIND_SORT
+        return self.get_field(Level)
     
     @classmethod
     def init_var(cls, value: TermName):

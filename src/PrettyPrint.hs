@@ -1,16 +1,15 @@
 {- pi-forall language -}
 
 -- | A Pretty Printer.
-module PrettyPrint (Disp (..), D (..), SourcePos, PP.Doc, ppr, debug) where
+module PrettyPrint (Disp (..), D (..), PP.Doc, ppr, debug) where
 
 import Control.Monad.Reader (MonadReader (ask, local), asks)
 import Data.Set qualified as S
 
-import Text.ParserCombinators.Parsec.Error (ParseError)
-import Text.ParserCombinators.Parsec.Pos (SourcePos, sourceColumn, sourceLine, sourceName)
 import Text.PrettyPrint (Doc, ($$), (<+>))
 import qualified Text.PrettyPrint as PP
 import Unbound.Generics.LocallyNameless qualified as Unbound
+import qualified Unbound.Generics.LocallyNameless.Name as Unbound
 import Unbound.Generics.LocallyNameless.Internal.Fold (toListOf)
 
 import Syntax
@@ -44,7 +43,7 @@ debug :: Disp d => d -> String
 debug p = PP.render (debugDisp p)
 
 -- | The 'Display' class is like the 'Disp' class. It qualifies
---   types that can be turned into 'Doc'.  The difference is that 
+--   types that can be turned into 'Doc'.  The difference is that
 --   this class uses the 'DispInfo' parameter and the Unbound library
 --   to generate fresh names during printing.
 class (Unbound.Alpha t) => Display t where
@@ -94,18 +93,6 @@ instance Disp D where
 instance Disp [D] where
   disp dl = PP.sep $ map disp dl
   debugDisp dl = PP.sep $ map disp dl
-
-instance Disp ParseError where
-  disp = PP.text . show
-  debugDisp = disp
-
-instance Disp SourcePos where
-  disp p =
-    PP.text (sourceName p) PP.<> PP.colon PP.<> PP.int (sourceLine p)
-      PP.<> PP.colon
-      PP.<> PP.int (sourceColumn p)
-      PP.<> PP.colon
-  debugDisp = disp
 
 instance Disp (Unbound.Name Term) where
   disp = PP.text . Unbound.name2String
@@ -266,10 +253,14 @@ parens b = if b then PP.parens else id
 brackets :: Bool -> Doc -> Doc
 brackets b = if b then PP.brackets else id
 
+-- showNameExact :: Unbound.Name a -> String
+-- showNameExact (Unbound.Fn name id) = [i|#{name}.#{id}|]
+-- showNameExact (Unbound.Bn debruijn id) = [i|#{debruijn}.#{id}|]
+
 instance Display (Unbound.Name Term) where
-  display n = do
-    b <- ask showLongNames
-    return (if b then debugDisp n else disp n)
+  display = return . disp -- display . showNameExact
+    -- b <- ask showLongNames
+    -- return (if b then debugDisp n else disp n)
 
 unfoldPi :: (Unbound.LFresh m) => Type -> m ([(TermName, Type)], Type)
 unfoldPi (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) ->
@@ -283,7 +274,8 @@ unfoldApp term = go term []
     go f args = (f, args)
 
 instance Display Term where
-  display TyType = return $ PP.text "Type"
+  display (Sort Zero) = return $ PP.text "Type"
+  display (Sort level) = return $ PP.text ("Type" ++ show level)
   display (Var n) = display n
   display a@(Lam b) = do
     n <- ask prec
@@ -312,8 +304,6 @@ instance Display Term where
       db <- withPrec 0 (display b)
       return $ PP.parens (da <+> PP.text ":" <+> db)
       else display a
-  display TrustMe = do
-    return $ PP.text "TRUSTME"
   display (DataType typeName) = display typeName
   display (Ctor typeName ctorName) = display @String [i|#{typeName}.#{ctorName}|]
   display (Rec typeName) = display @String [i|#{typeName}.rec|]

@@ -3,7 +3,7 @@ module Environment where
 import Control.Monad.Except (MonadError(..), Except, runExcept)
 import Control.Monad.Reader (MonadReader(local), asks, ReaderT(runReaderT))
 import Control.Monad.Trans (lift)
-import PrettyPrint (SourcePos, D(..), Disp(..), Doc, ppr)
+import PrettyPrint (D(..), Disp(..), Doc, ppr)
 import Syntax
 import Text.PrettyPrint.HughesPJ (($$), sep)
 import qualified Unbound.Generics.LocallyNameless as Unbound
@@ -14,6 +14,7 @@ import Control.Arrow ((&&&))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Foldable (find)
+import Data.String.Interpolate (i)
 
 data Trace = Invoc String [String] | Event String | Result String
 
@@ -60,15 +61,15 @@ lookupType :: TermName -> TcMonad Type
 lookupType var = asks (Map.lookup var . decls &&& Map.lookup var . locals) >>= \case
   (_, Just type') -> return type'
   (Just (type', _), Nothing) -> return type'
-  (Nothing, Nothing) -> err [DD var, DS "not found"]
+  (Nothing, Nothing) -> err [DS"Variable", DD var, DS "not found"]
 
 addLocal :: TermName -> Type -> TcMonad a -> TcMonad a
 addLocal var type' = local $ \env@(Env _ _ locals) -> env { locals = Map.insert var type' locals }
 
 addDataType :: DataTypeName -> Type -> [(CtorName, Type)] -> TcMonad a -> TcMonad a
-addDataType name params ctors monad = asks (Map.lookup name . datatypes) >>= \case
+addDataType name signature ctors monad = asks (Map.lookup name . datatypes) >>= \case
   Nothing -> flip local monad $
-    \env@(Env datatypes _ _) -> env { datatypes = Map.insert name (params, ctors) datatypes }
+    \env@(Env datatypes _ _) -> env { datatypes = Map.insert name (signature, ctors) datatypes }
   Just _ -> err [DS "Name conflict when declaring data type", DD name]
 
 addDecl :: TermName -> Type -> Term -> TcMonad a -> TcMonad a

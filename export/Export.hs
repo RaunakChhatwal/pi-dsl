@@ -5,14 +5,14 @@ module Export where
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
 import Bindings (implStorable, alignOffsetUp, buildDeclOrder, sizeOf, alignment, exportFunction)
-import Syntax(Entry(Data, Decl), Term(TyType), TermName, Type)
+import Syntax(Entry(Data, Decl), Term, TermName, Type)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)
 import Data.Functor ((<&>))
 import Data.String.Interpolate (i)
 import PrettyPrint (ppr)
 import Environment (Env, Err, runTcMonad, TcMonad, Trace, traceTcMonad)
-import TypeCheck (checkType, inferType, tcEntries, withEntries)
+import TypeCheck (checkType, ensureType, inferType, tcEntries, withEntries)
 import Control.Monad (join, foldM_, void)
 import qualified Environment as Env
 import Control.Monad.Trans (liftIO)
@@ -103,4 +103,4 @@ $(join $ exportFunction "check_type"
   <*> [t| Maybe String |]
   <*> [| \entries term type' -> do
             return . eitherToMaybe . runTcMonad $ withEntries entries $
-              checkType type' TyType >> checkType term type' |])
+              ensureType type' >> checkType term type' |])

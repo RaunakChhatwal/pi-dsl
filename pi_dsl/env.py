@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from .base import *
 from . import bindings, tracing
 from .bindings import Either, Entry, Maybe, unbind
-from .term import Ann, App, DataType, Lam, Pi, Rec, Term, Type, Universe, Var
+from .term import Ann, App, DataType, Lam, Pi, Rec, Sort, Term, Type, Var
 
 @dataclass
 class Decl:
@@ -17,8 +17,13 @@ class Decl:
 
 def binding_to_term(binding: bindings.Term, env: Env) -> Term:
     match binding.kind:
-        case bindings.Term.KIND_TY_TYPE:
-            return Universe
+        case bindings.Term.KIND_SORT:
+            level = 0
+            level_binding = binding.get_sort()
+            while level_binding.kind == 1:
+                level += 1
+                level_binding = level_binding.get_succ()
+            return Sort(level)
 
         case bindings.Term.KIND_VAR:
             return Var(str(binding.get_var().get_fn()[0]))
@@ -40,9 +45,6 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
         case bindings.Term.KIND_ANN:
             term, hint = binding.get_ann()
             return Ann(binding_to_term(term, env), binding_to_term(hint, env))
-
-        case bindings.Term.KIND_TRUST_ME:
-            raise NotImplementedError()
 
         case bindings.Term.KIND_DATA_TYPE:
             return env.datatypes[str(binding.get_data_type())]

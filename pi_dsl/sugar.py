@@ -32,9 +32,8 @@ def remove_stub(term: Term, self: DataType) -> Term:
             return App(remove_stub(body, self), remove_stub(hint, self))
         case App(func, arg):
             return App(remove_stub(func, self), remove_stub(arg, self))
-        case Ctor(name, DataType(type_name, type_params, ctors), signature):
-            type_params = [remove_stub_from_param(param, self) for param in type_params]
-            datatype = DataType(type_name, type_params, ctors)
+        case Ctor(name, DataType(type_name, type_signature, ctors), signature):
+            datatype = DataType(type_name, remove_stub(type_signature, self), ctors)
             return Ctor(name, datatype, remove_stub(signature, self))
         case Lam(vars, body):
             return Lam(vars, remove_stub(body, self))
@@ -46,15 +45,15 @@ def remove_stub(term: Term, self: DataType) -> Term:
                     return Pi(params, return_type)
                 case param:
                     return Pi(remove_stub_from_param(param, self), return_type)
-        case DataType() | UniverseSingleton() | Var():
+        case DataType() | Sort() | Var():
             return term
         case _:
             assert isinstance(term, SelfSingleton)
             return self
 
-def datatype(env: Env, type_params: list[Param] = []):
+def datatype(env: Env, signature: Type=Set):
     def decorator[T: DataTypeMeta](cls: T) -> T:
-        cls.params = type_params
+        cls.signature = signature
         cls.ctors = []
 
         for class_var, hint in cls.__dict__.get("__annotations__", {}).items():

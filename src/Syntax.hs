@@ -14,10 +14,24 @@ type TermName = Unbound.Name Term
 -- as a type or as a term.
 type Type = Term
 
+data Level = Zero | Succ Level
+  deriving Generic deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
+
+maxLevel :: Level -> Level -> Level
+maxLevel Zero b = b
+maxLevel a Zero = a
+maxLevel (Succ a) (Succ b) = Succ $ maxLevel a b
+
+levelToInt :: Level -> Int
+levelToInt Zero = 0
+levelToInt (Succ level) = 1 + levelToInt level
+
+instance Show Level where
+  show = show . levelToInt
+
 -- | basic language
 data Term
-  = -- | type of types, concretely `Type`
-    TyType
+  = Sort Level
   | -- | variable `x`
     Var TermName
   | -- | abstraction  `\x. a`
@@ -28,8 +42,6 @@ data Term
     Pi Type (Unbound.Bind TermName Type)
   | -- | annotated terms `( a : A )`
     Ann Term Type
-  | -- | an axiom 'TRUSTME', inhabits all types
-    TrustMe
   | -- | type constructors (fully applied)
     DataType DataTypeName
   | -- | term constructors (fully applied)
@@ -52,11 +64,11 @@ data Entry = Decl TermName Type Term | Data DataTypeName Type [(CtorName, Type)]
 -- * `Alpha` class instances
 
 -- The Unbound library's `Alpha` class enables the `aeq`, `fv`,
--- `instantiate` and `unbind` functions, and also allows some 
+-- `instantiate` and `unbind` functions, and also allows some
 -- specialization of their generic behavior.
 
--- For `Term`, we'd like Alpha equivalence to ignore 
--- source positions and type annotations. So we make sure to 
+-- For `Term`, we'd like Alpha equivalence to ignore
+-- source positions and type annotations. So we make sure to
 -- remove them before calling the generic operation.
 
 instance Unbound.Alpha Term where
@@ -73,7 +85,7 @@ instance Unbound.Alpha Term where
 -- It has two parameters because the type of thing we are substituting
 -- for may not be the same as what we are substituting into.
 
--- The `isvar` function identifies the variables in the term that 
+-- The `isvar` function identifies the variables in the term that
 -- should be substituted for.
 instance Unbound.Subst Term Term where
   isvar (Var x) = Just (Unbound.SubstName x)
