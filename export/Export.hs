@@ -4,7 +4,8 @@ module Export where
 
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
-import Bindings (implStorable, alignOffsetUp, buildDeclOrder, sizeOf, alignment, exportFunction)
+import Bindings (buildDeclOrder)
+import FFI (implStorable, alignOffsetUp, sizeOf, alignment, exportFunction)
 import Syntax(Entry(Data, Decl), Term, TermName, Type)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)

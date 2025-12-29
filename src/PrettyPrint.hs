@@ -1,5 +1,3 @@
-{- pi-forall language -}
-
 -- | A Pretty Printer.
 module PrettyPrint (Disp (..), D (..), PP.Doc, ppr, debug) where
 

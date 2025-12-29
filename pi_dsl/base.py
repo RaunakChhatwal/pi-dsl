@@ -6,14 +6,14 @@ import subprocess as sp
 from typing import Any, cast, TypeVar
 
 # Load the shared library
-command = "fd pi-forall-lib.so dist-newstyle"
+command = "fd pi-dsl-shared-lib.so dist-newstyle"
 path = sp.run(command.split(), capture_output=True, check=True, text=True).stdout.strip()
 lib = ctypes.CDLL(path)
 
 # Initialize Haskell runtime
-lib.pi_forall_init.argtypes = []
-lib.pi_forall_init.restype = None
-lib.pi_forall_init()
+lib.pi_dsl_init.argtypes = []
+lib.pi_dsl_init.restype = None
+lib.pi_dsl_init()
 
 class TaggedUnion(Structure):
     _fields_ = [

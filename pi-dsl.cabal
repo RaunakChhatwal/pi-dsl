@@ -1,21 +1,8 @@
 cabal-Version: 2.2
-name: pi-forall
-version: 0.2
-license: MIT
-license-file: LICENSE
-copyright: (c) 2013-2023 University of Pennsylvania
-description: An implementation of a simple dependently typed language for OPLSS 2022
-author: Stephanie Weirich <sweirich@seas.upenn.edu>, based on code by Trellys Team <trellys@...>
-maintainer: Stephanie Weirich <sweirich@seas.upenn.edu>
+name: pi-dsl
+version: 0.1
 build-type: Simple
-tested-with: GHC == 8.10.7
-category: Compilers/Interpreters
-homepage: https://github.com/sweirich/pi-forall
-synopsis: Demo implementation of typechecker for dependently-typed language
-
-source-repository head
-  type: git
-  location: https://github.com/sweirich/pi-forall
+tested-with: GHC == 9.8.4
 
 common shared-properties
   default-language:
@@ -64,24 +51,16 @@ library
     Syntax
     TypeCheck
 
-executable pi-forall
+executable bindgen
   import: shared-properties
-  build-depends: pi-forall
-  hs-source-dirs: app
+  build-depends: pi-dsl
+  hs-source-dirs: bindgen
   main-is: Main.hs
 
--- test-suite test-pi-forall
---   import: shared-properties
---   build-depends: pi-forall
---     , QuickCheck >= 2.13.2
---   type: exitcode-stdio-1.0
---   hs-source-dirs: test
---   main-is: Main.hs
-
-foreign-library pi-forall-lib
+foreign-library pi-dsl-shared-lib
   import: shared-properties
   type: native-shared
-  build-depends: pi-forall
+  build-depends: pi-dsl
   hs-source-dirs: export
-  other-modules: Export
+  other-modules: Export, FFI
   c-sources: export/export.c

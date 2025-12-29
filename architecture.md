@@ -16,7 +16,7 @@ The system is organized into three main layers:
 
 ### 1. Haskell Type System Core
 
-The Haskell implementation is based on the pi-forall language, a simple dependently typed language originally developed for OPLSS 2022.
+The Haskell implementation is a fork of the educational pi-forall language by Stephanie Weirich.
 
 #### Key Modules:
 
@@ -33,10 +33,15 @@ The Haskell implementation is based on the pi-forall language, a simple dependen
 
 #### `Export.hs` - Haskell Export Module:
 - Exposes FFI entry points: `bind`, `unbind`, `ppr_term`, `type_check`, `trace_type_check`, `infer_type`, `check_type`
-- Runtime init/exit lives in `export.c` (`pi_forall_init`/`pi_forall_exit`)
+- Runtime init/exit lives in `export.c` (`pi_dsl_init`/`pi_dsl_exit`)
+- Uses `FFI.hs` helpers to generate `Storable` instances and C-callable wrapper exports
 
-#### `Bindings.hs` - Template Haskell Code Generation:
-- Generates Python `ctypes` bindings for selected Haskell types and exported functions
+#### `FFI.hs` - FFI Helpers:
+- Template Haskell utilities for `Storable` instances (tagged unions/newtypes) and `foreign export ccall` wrapper generation (`exportFunction`)
+
+#### `Bindings.hs` / `bindgen` - Template Haskell Code Generation:
+- `Bindings.hs` generates Python `ctypes` bindings for selected Haskell types and exported functions
+- The `bindgen` executable (`bindgen/Main.hs`) emits the generated `pi_dsl/bindings.py`
 
 ### 3. Python DSL Layer
 
@@ -54,9 +59,9 @@ The Haskell implementation is based on the pi-forall language, a simple dependen
 
 ### 4. Build and Development Infrastructure
 
-- **`pi-forall.cabal`**: Haskell library + codegen executable + shared foreign library
+- **`pi-dsl.cabal`**: Haskell library + `bindgen` codegen executable + shared foreign library (`pi-dsl-shared-lib`)
 - **`flake.nix`**, **`pyproject.toml`**: dev environment and Python packaging
-- **`app/Main.hs`**: generates `pi_dsl/bindings.py`
+- **`bindgen/Main.hs`**: generates `pi_dsl/bindings.py`
 
 ## Data Flow and Interactions
 
@@ -65,7 +70,3 @@ The Haskell implementation is based on the pi-forall language, a simple dependen
 1. Build Python terms (`term.py`/`sugar.py`) and environment entries (`env.py`)
 2. Convert to Haskell via `binding()` and call the exported kernel
 3. Return either a type/result or an error plus traces (`tracing.py`)
-
-### Binding Generation Process:
-
-1. Template Haskell inspects Haskell types and emits `pi_dsl/bindings.py` plus FFI glue (`Export.hs`)
