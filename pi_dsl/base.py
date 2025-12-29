@@ -2,13 +2,23 @@ from __future__ import annotations
 import ctypes
 from ctypes import c_int32, c_size_t, c_void_p, POINTER, Structure
 from functools import cache
-import subprocess as sp
+from pathlib import Path
 from typing import Any, cast, TypeVar
 
-# Load the shared library
-command = "fd pi-dsl-shared-lib.so dist-newstyle"
-path = sp.run(command.split(), capture_output=True, check=True, text=True).stdout.strip()
-lib = ctypes.CDLL(path)
+here = Path(__file__).resolve().parent
+bundled = here / "_native" / "libpi-dsl-shared-lib.so"
+if bundled.exists():
+    lib = ctypes.CDLL(bundled)
+else:
+    artifacts_root = here.parent / "dist-newstyle"
+    error = Exception("Couldn't find kernel")
+    if not artifacts_root.exists():
+        raise error
+
+    if match := next(artifacts_root.rglob("libpi-dsl-shared-lib.so"), None):
+        lib = ctypes.CDLL(match)
+    else:
+        raise error
 
 # Initialize Haskell runtime
 lib.pi_dsl_init.argtypes = []

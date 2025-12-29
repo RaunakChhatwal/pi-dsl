@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pi_dsl"
+version = "0.1.0"
+description = "Dependently typed DSL embedded in Python"
+# authors = [{name = "Your Name", email = "you@example.com"}]
+readme = "README.md"
+requires-python = ">=3.12"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pi_dsl*"]
+
+[tool.setuptools.package-data]
+pi_dsl = ["_native/*.so"]
