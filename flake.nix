@@ -35,6 +35,8 @@
             export PYTHONPATH="$out/${pkgs.python3.sitePackages}:$PYTHONPATH"
             python -c "import pi_dsl"
 
+            ${piDslHs}/bin/bindgen | diff -u pi_dsl/bindings.py -
+
             pyright pi_dsl/*
             python test/add_comm.py
             python test/datatypes.py

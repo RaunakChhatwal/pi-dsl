@@ -119,6 +119,28 @@ class Name[T1](TaggedUnion):
         assert self.kind == self.KIND_BN
         return self.get_field(Tuple[Int, Int]).get()
 
+class Var(TaggedUnion):
+    kind: Literal[0, 1]
+    
+    KIND_LOCAL = 0
+    KIND_GLOBAL = 1
+    
+    @classmethod
+    def init_local(cls, value: TermName):
+        return cls(cls.KIND_LOCAL, value)
+    
+    def get_local(self) -> TermName:
+        assert self.kind == self.KIND_LOCAL
+        return self.get_field(TermName)
+    
+    @classmethod
+    def init_global(cls, value: String):
+        return cls(cls.KIND_GLOBAL, value)
+    
+    def get_global(self) -> String:
+        assert self.kind == self.KIND_GLOBAL
+        return self.get_field(String)
+
 class Bind[T1, T2](TaggedUnion):
     kind: Literal[0]
     
@@ -154,12 +176,12 @@ class Term(TaggedUnion):
         return self.get_field(Level)
     
     @classmethod
-    def init_var(cls, value: TermName):
+    def init_var(cls, value: Var):
         return cls(cls.KIND_VAR, value)
     
-    def get_var(self) -> TermName:
+    def get_var(self) -> Var:
         assert self.kind == self.KIND_VAR
-        return self.get_field(TermName)
+        return self.get_field(Var)
     
     @classmethod
     def init_lam(cls, value: Bind[TermName, Term]):
@@ -223,12 +245,12 @@ class Env(TaggedUnion):
     KIND_ENV = 0
     
     @classmethod
-    def init_env(cls, *values: *tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[TermName, Tuple[Type, Term]], Map[TermName, Type]]):
+    def init_env(cls, *values: *tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type]]):
         return cls(cls.KIND_ENV, init_tuple(*values))
     
-    def get_env(self) -> tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[TermName, Tuple[Type, Term]], Map[TermName, Type]]:
+    def get_env(self) -> tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type]]:
         assert self.kind == self.KIND_ENV
-        return self.get_field(Tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[TermName, Tuple[Type, Term]], Map[TermName, Type]]).get()
+        return self.get_field(Tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type]]).get()
 
 class Entry(TaggedUnion):
     kind: Literal[0, 1]
@@ -237,12 +259,12 @@ class Entry(TaggedUnion):
     KIND_DATA = 1
     
     @classmethod
-    def init_decl(cls, *values: *tuple[TermName, Type, Term]):
+    def init_decl(cls, *values: *tuple[String, Type, Term]):
         return cls(cls.KIND_DECL, init_tuple(*values))
     
-    def get_decl(self) -> tuple[TermName, Type, Term]:
+    def get_decl(self) -> tuple[String, Type, Term]:
         assert self.kind == self.KIND_DECL
-        return self.get_field(Tuple[TermName, Type, Term]).get()
+        return self.get_field(Tuple[String, Type, Term]).get()
     
     @classmethod
     def init_data(cls, *values: *tuple[DataTypeName, Type, List[Tuple[CtorName, Type]]]):

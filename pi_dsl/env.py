@@ -3,17 +3,17 @@ from dataclasses import dataclass
 from .base import *
 from . import bindings, tracing
 from .bindings import Either, Entry, Maybe, unbind
-from .term import Ann, App, DataType, Lam, Pi, Rec, Sort, Term, Type, Var
+from .term import Ann, App, DataType, Global, Lam, Pi, Rec, Sort, Term, Type, Var
 
 @dataclass
 class Decl:
-    var: Var
+    var: Global
     signature: Type
     body: Term
 
     def entry_binding(self) -> bindings.Entry:
         return bindings.Entry.init_decl(
-            self.var.name_binding(), self.signature.binding(), self.body.binding())
+            String(self.var.name), self.signature.binding(), self.body.binding())
 
 def binding_to_term(binding: bindings.Term, env: Env) -> Term:
     match binding.kind:
@@ -26,7 +26,13 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
             return Sort(level)
 
         case bindings.Term.KIND_VAR:
-            return Var(str(binding.get_var().get_fn()[0]))
+            var_binding = binding.get_var()
+            match var_binding.kind:
+                case bindings.Var.KIND_LOCAL:
+                    return Var(str(var_binding.get_local().get_fn()[0]))
+                case bindings.Var.KIND_GLOBAL:
+                    return Global(str(var_binding.get_global()))
+            # return Var(str(binding.get_var().get_fn()[0]))
 
         case bindings.Term.KIND_LAM:
             var, body = unbind(binding.get_lam()).get()
@@ -91,7 +97,7 @@ class Env:
             self.datatypes.pop(datatype.name)
             raise error
 
-    def declare(self, var: Var, hint: Type, defn: Term):
+    def declare(self, var: Global, hint: Type, defn: Term):
         assert var.name not in self.entries
         self.entries.append(var.name)
         self.decls[var.name] = Decl(var, hint, defn)

@@ -14,6 +14,7 @@ import Syntax
 import Data.String.Interpolate (i)
 import Control.Monad (forM)
 import Data.Bifunctor (first)
+import Data.Bool (bool)
 
 -------------------------------------------------------------------------
 
@@ -68,10 +69,10 @@ data D
     forall a. Disp a => DD a
 
 initDI :: DispInfo
-initDI = DI {showAnnots = False,
+initDI = DI {showAnnots = True,
                           dispAvoid = S.empty,
                           prec = 0,
-                          showLongNames = False
+                          showLongNames = True
                           }
 
 
@@ -133,7 +134,9 @@ instance Display Entry where
     pure $ PP.hang (PP.text "data" <+> dn <+> PP.text ":" <+> dp <+> PP.text "where") 2 (PP.vcat dc)
 
 
-
+instance Display Var where
+  display (Local name) = display name
+  display (Global name) = display name
 
 -------------------------------------------------------------------------
 
@@ -251,14 +254,15 @@ parens b = if b then PP.parens else id
 brackets :: Bool -> Doc -> Doc
 brackets b = if b then PP.brackets else id
 
--- showNameExact :: Unbound.Name a -> String
--- showNameExact (Unbound.Fn name id) = [i|#{name}.#{id}|]
--- showNameExact (Unbound.Bn debruijn id) = [i|#{debruijn}.#{id}|]
+showNameExact :: Unbound.Name a -> String
+showNameExact (Unbound.Fn name id) = [i|#{name}.#{id}|]
+showNameExact (Unbound.Bn debruijn id) = [i|#{debruijn}.#{id}|]
 
 instance Display (Unbound.Name Term) where
-  display = return . disp -- display . showNameExact
+  display = display . show
     -- b <- ask showLongNames
     -- return (if b then debugDisp n else disp n)
+  -- display name = bool (disp name) (disp $ showNameExact name) <$> ask showLongNames
 
 unfoldPi :: (Unbound.LFresh m) => Type -> m ([(TermName, Type)], Type)
 unfoldPi (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) ->
@@ -274,7 +278,7 @@ unfoldApp term = go term []
 instance Display Term where
   display (Sort Zero) = return $ PP.text "Type"
   display (Sort level) = return $ PP.text ("Type" ++ show level)
-  display (Var n) = display n
+  display (Var var) = display var
   display a@(Lam b) = do
     n <- ask prec
     (binds, body) <- withPrec levelLam $ gatherBinders a

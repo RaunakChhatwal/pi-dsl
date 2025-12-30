@@ -45,7 +45,7 @@ traceTcMonad = go [] where
 
 data Env = Env {
   datatypes :: Map DataTypeName (Type, [(CtorName, Type)]),
-  decls :: Map TermName (Type, Term),
+  decls :: Map String (Type, Term),
   locals :: Map TermName Type
 }
 
@@ -54,14 +54,16 @@ justOr error m = m >>= \case
   Just a -> return a
   Nothing -> err error
 
-lookupDecl :: TermName -> TcMonad (Maybe (Type, Term))
+lookupDecl :: String -> TcMonad (Maybe (Type, Term))
 lookupDecl var = asks (Map.lookup var . decls)
 
-lookupType :: TermName -> TcMonad Type
-lookupType var = asks (Map.lookup var . decls &&& Map.lookup var . locals) >>= \case
-  (_, Just type') -> return type'
-  (Just (type', _), Nothing) -> return type'
-  (Nothing, Nothing) -> err [DS"Variable", DD var, DS "not found"]
+lookupType :: Var -> TcMonad Type
+lookupType (Local name) = asks (Map.lookup name . locals) >>= \case
+  Just type' -> return type'
+  Nothing -> err [DS"Local variable", DD name, DS "not found"]
+lookupType (Global name) = asks (Map.lookup name . decls) >>= \case
+  Just (type', _) -> return type'
+  Nothing -> err [DS"Global variable", DD name, DS "not found"]
 
 addLocal :: TermName -> Type -> TcMonad a -> TcMonad a
 addLocal var type' = local $ \env@(Env _ _ locals) -> env { locals = Map.insert var type' locals }
@@ -72,7 +74,7 @@ addDataType name signature ctors monad = asks (Map.lookup name . datatypes) >>= 
     \env@(Env datatypes _ _) -> env { datatypes = Map.insert name (signature, ctors) datatypes }
   Just _ -> err [DS "Name conflict when declaring data type", DD name]
 
-addDecl :: TermName -> Type -> Term -> TcMonad a -> TcMonad a
+addDecl :: String -> Type -> Term -> TcMonad a -> TcMonad a
 addDecl var type' def monad = asks (Map.lookup var . decls) >>= \case
   Nothing -> flip local monad $
     \env@(Env _ decls _) -> env { decls = Map.insert var (type', def) decls }

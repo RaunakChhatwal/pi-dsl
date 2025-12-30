@@ -12,77 +12,86 @@ import Unbound.Generics.LocallyNameless qualified as Unbound
 import Environment (addDataType, err, lookupDataType, TcMonad, traceM)
 import {-# SOURCE #-} Equal (whnf)
 import PrettyPrint (D(DS, DD), ppr)
-import Syntax (CtorName, DataTypeName, Term(..), TermName, Type)
+import Syntax (CtorName, DataTypeName, Term(..), TermName, Type, lVar)
 import {-# SOURCE #-} TypeCheck (checkType, ensureType)
 
-hole :: TermName
-hole = Unbound.string2Name "_"
+
+freshName :: String -> TcMonad TermName
+freshName s = Unbound.fresh (Unbound.string2Name s)
 
 addParam :: (TermName, Type) -> Type -> Type
 addParam (paramName, paramType) = Pi paramType . Unbound.bind paramName
 
-motiveFromTypeSignature :: DataTypeName -> [TermName] -> Type -> TcMonad Type
-motiveFromTypeSignature typeName paramNames (Pi paramType bind) = do
-  (paramName, returnType) <- Unbound.unbind bind
-  addParam (paramName, paramType) <$>
-    motiveFromTypeSignature typeName (paramName : paramNames) returnType
-motiveFromTypeSignature typeName paramNames returnType = do
-  let fullyApplied = foldl App (DataType typeName) $ map Var $ reverse paramNames
-  whnf returnType >>= \case
-    Sort u -> return $ addParam (hole, fullyApplied) $ Sort u
-    _ -> err [DS "Expected data type signature to end in a Sort, but got", DD returnType]
-
-motive :: TermName
-motive = Unbound.string2Name "motive"
+motiveFromTypeSignature :: TermName -> DataTypeName -> [TermName] -> Type -> TcMonad Type
+motiveFromTypeSignature hole typeName paramNames = whnf >=> \case
+  Pi paramType bind -> do
+    (paramName, returnType) <- Unbound.unbind bind
+    addParam (paramName, paramType) <$>
+      motiveFromTypeSignature hole typeName (paramName : paramNames) returnType
+  returnType -> do
+    let fullyApplied = foldl App (DataType typeName) $ map lVar $ reverse paramNames
+    case returnType of
+      Sort u -> return $ addParam (hole, fullyApplied) $ Sort u
+      _ -> err [DS "Expected data type signature to return a Sort, but got", DD returnType]
 
 motiveFromCtorParam ::
-  DataTypeName -> [TermName] -> [Term] -> TermName -> Type -> TcMonad (Maybe Type)
-motiveFromCtorParam self paramNames args name = whnf >=> \case
+  TermName -> DataTypeName -> [TermName] -> [Term] -> TermName -> Type -> TcMonad (Maybe Type)
+motiveFromCtorParam motive self paramNames args name = whnf >=> \case
   Pi paramType bind -> do
     (paramName, returnType) <- Unbound.unbind bind
     fmap (addParam (paramName, paramType)) <$>
-      motiveFromCtorParam self (paramName : paramNames) [] name returnType
-  App f arg -> motiveFromCtorParam self paramNames (arg : args) name f
+      motiveFromCtorParam motive self (paramName : paramNames) [] name returnType
+  App f arg -> motiveFromCtorParam motive self paramNames (arg : args) name f
   DataType typeName | typeName == self ->
     return $ Just $ App motiveApplied paramApplied where
-    motiveApplied = foldl App (Var motive) args
-    paramApplied = foldl App (Var name) $ map Var (reverse paramNames)
+    motiveApplied = foldl App (lVar motive) args
+    paramApplied = foldl App (lVar name) $ map lVar (reverse paramNames)
   _ -> return Nothing
 
-motiveFromCtorReturnType :: Term -> [Term] -> Type -> TcMonad Type
-motiveFromCtorReturnType ctorApplied args = whnf >=> \case
-  App f arg -> motiveFromCtorReturnType ctorApplied (arg : args) f
-  _ -> return $ App (foldl App (Var motive) args) ctorApplied
+motiveFromCtorReturnType :: TermName -> Term -> [Term] -> Type -> TcMonad Type
+motiveFromCtorReturnType motive ctor args = whnf >=> \case
+  App f arg -> motiveFromCtorReturnType motive ctor (arg : args) f
+  _ -> return $ App (foldl App (lVar motive) args) ctor
 
-recursorCaseFromCtor :: CtorName -> DataTypeName -> Term -> Type -> TcMonad Type
-recursorCaseFromCtor ctorName typeName ctorApplied = whnf >=> \case
-  (Pi paramType bind) -> do
+recursorCaseFromCtor
+  :: TermName -> TermName -> CtorName -> DataTypeName -> Term -> Type -> TcMonad Type
+recursorCaseFromCtor motive hole ctorName typeName ctor = whnf >=> \case
+  Pi paramType bind -> do
     (paramName, returnType) <- Unbound.unbind bind
-    rest <- recursorCaseFromCtor ctorName typeName (App ctorApplied $ Var paramName) returnType
-    motiveFromCtorParam typeName [] [] paramName paramType <&> \case
+    let ctorApplied = App ctor $ lVar paramName
+    rest <- recursorCaseFromCtor motive hole ctorName typeName ctorApplied returnType
+    motiveFromCtorParam motive typeName [] [] paramName paramType <&> \case
       Nothing -> addParam (paramName, paramType) rest
-      Just motive -> addParam (paramName, paramType) $ addParam (hole, motive) rest
-  returnType -> motiveFromCtorReturnType ctorApplied [] returnType
+      Just hypothesis -> addParam (paramName, paramType) $ addParam (hole, hypothesis) rest
+  returnType -> motiveFromCtorReturnType motive ctor [] returnType
 
-motiveFromSelf :: DataTypeName -> [TermName] -> Type -> TcMonad Type
-motiveFromSelf typeName paramNames (Pi paramType bind) = do -- TODO: whnf?
-  (paramName, returnType) <- Unbound.unbind bind
-  addParam (paramName, paramType) <$>
-    motiveFromSelf typeName (paramName : paramNames) returnType
-motiveFromSelf typeName paramNames _ = do
-  let self = Unbound.string2Name "self"
-  let selfApplied = foldl App (DataType typeName) $ map Var $ reverse paramNames
-  let motiveApplied = App (foldl App (Var motive) $ map Var $ reverse paramNames) (Var self)
-  return $ addParam (self, selfApplied) motiveApplied
+motiveFromSelf :: TermName -> TermName -> DataTypeName -> [TermName] -> Type -> TcMonad Type
+motiveFromSelf motive selfName typeName paramNames = whnf >=> \case
+  Pi paramType bind -> do
+    (paramName, returnType) <- Unbound.unbind bind
+    addParam (paramName, paramType) <$>
+      motiveFromSelf motive selfName typeName (paramName : paramNames) returnType
+  _ -> do
+    let selfApplied = foldl App (DataType typeName) $ map lVar $ reverse paramNames
+    let motiveApplied =
+          App (foldl App (lVar motive) $ map lVar $ reverse paramNames) (lVar selfName)
+    return $ addParam (selfName, selfApplied) motiveApplied
 
 synthesizeRecursorType :: DataTypeName -> TcMonad Type
 synthesizeRecursorType typeName = do
   (signature, ctorDefs) <- lookupDataType typeName
-  motiveType <- motiveFromTypeSignature typeName [] signature
+
+  -- Use fresh binder names to avoid capturing user variables like `motive`/`self`.
+  motive <- freshName "motive"
+  selfName <- freshName "self"
+  hole <- freshName "_"
+
+  motiveType <- motiveFromTypeSignature hole typeName [] signature
   cases <- forM ctorDefs $ \(ctorName, ctorType) ->
-    recursorCaseFromCtor ctorName typeName (Ctor typeName ctorName) ctorType
-  addParam (motive, motiveType) <$>
-    (foldr (addParam . (hole,)) <$> motiveFromSelf typeName [] signature <*> pure cases)
+    recursorCaseFromCtor motive hole ctorName typeName (Ctor typeName ctorName) ctorType
+
+  motiveParam <- motiveFromSelf motive selfName typeName [] signature
+  return $ addParam (motive, motiveType) $ foldr (addParam . (hole,)) motiveParam cases
 
 unfoldApps :: Term -> TcMonad (Term, [Term])
 unfoldApps term = second reverse <$> go term where
@@ -109,7 +118,7 @@ hypothesisForParam typeName paramNames recursor ctorArg = whnf >=> \case
       hypothesisForParam typeName (paramName : paramNames) recursor ctorArg returnType
   App typeCtor _ -> hypothesisForParam typeName paramNames recursor ctorArg typeCtor
   DataType name | name == typeName ->
-    return $ Just $ App recursor $ foldl App ctorArg $ map Var $ reverse paramNames
+    return $ Just $ App recursor $ foldl App ctorArg $ map lVar $ reverse paramNames
   _ -> return Nothing
 
 argsForCase :: DataTypeName -> Term -> [Term] -> Type -> TcMonad [Term]
@@ -126,17 +135,17 @@ reduceRecursor :: DataTypeName -> [Term] -> TcMonad (Maybe Term)
 reduceRecursor _ [] = return Nothing
 reduceRecursor typeName (motive:args) =
   traceM "reduceRecursor" (typeName : ppr motive : map ppr args) ppr $ do
-  (typeSignature, ctors) <- lookupDataType typeName
-  numTypeParams <- length . fst <$> unfoldPi typeSignature
-  splitReducerArgs (length ctors) numTypeParams args >>= \case
-    Nothing -> return Nothing
-    Just (cases, (typeArgs, (scrutinee, extraArgs))) -> whnf scrutinee >>= unfoldApps >>= \case
-      (Ctor scrutineeTypeName ctorName, ctorArgs) | scrutineeTypeName == typeName -> do
-        let recursor = foldl App (Rec typeName) $ motive : cases ++ typeArgs
-        let ((_, ctorType), case') = fromJust $ find ((ctorName ==) . fst . fst) (zip ctors cases)
-        caseArgs <- argsForCase typeName recursor ctorArgs ctorType
-        return $ Just $ foldl App case' $ caseArgs ++ extraArgs
-      _ -> return Nothing
+    (typeSignature, ctors) <- lookupDataType typeName
+    numTypeParams <- length . fst <$> unfoldPi typeSignature
+    splitReducerArgs (length ctors) numTypeParams args >>= \case
+      Nothing -> return Nothing
+      Just (cases, (typeArgs, (scrutinee, extraArgs))) -> whnf scrutinee >>= unfoldApps >>= \case
+        (Ctor scrutineeTypeName ctorName, ctorArgs) | scrutineeTypeName == typeName -> do
+          let recursor = foldl App (Rec typeName) $ motive : cases ++ typeArgs
+          let ((_, ctorType), case') = fromJust $ find ((ctorName ==) . fst . fst) (zip ctors cases)
+          caseArgs <- argsForCase typeName recursor ctorArgs ctorType
+          return $ Just $ foldl App case' $ caseArgs ++ extraArgs
+        _ -> return Nothing
 
 checkCtorReturnsSelf :: CtorName -> DataTypeName -> Type -> TcMonad ()
 checkCtorReturnsSelf _ self (DataType typeName) | typeName == self = return ()

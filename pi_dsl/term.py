@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import functools
-from typing import cast, Self
 from .base import init_tuple, Int, List, String, Tuple
 from . import bindings
 from .bindings import bind, Entry, ppr_term, TermName
@@ -19,14 +18,6 @@ class Term():
     def __str__(self) -> str:
         return str(ppr_term(self.binding()))
 
-    def union(self) -> TermUnion:
-        return cast(TermUnion, self)
-
-    @classmethod
-    def fr0m(cls, term: Term) -> Self:
-        assert isinstance(term, cls)
-        return term
-
     def __call__(self, *args: Term) -> Term:
         return functools.reduce(App, args, self)
 
@@ -40,7 +31,7 @@ class Term():
         return Pi(other, self)
 
     def __add__(self, other: Term) -> Term:
-        return Var("add")(self, other)
+        return Global("add")(self, other)
 
 type Type = Term
 
@@ -65,7 +56,7 @@ class Var(Term):
     name: str
 
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_var(self.name_binding())
+        return bindings.Term.init_var(bindings.Var.init_local(self.name_binding()))
 
     def name_binding(self) -> TermName:
         return bindings.Name[bindings.Term].init_fn(String(self.name), Int(0))
@@ -110,6 +101,13 @@ class DataType(Term):
             *[init_tuple(String(ctor.name), ctor.signature.binding()) for ctor in self.ctors])
         return bindings.Entry.init_data(
             String(self.name), self.signature.binding(), ctor_defs)
+
+@dataclass
+class Global(Term):     # TODO: inherit from Var?
+    name: str
+
+    def binding(self) -> bindings.Term:
+        return bindings.Term.init_var(bindings.Var.init_global(String(self.name)))
 
 @dataclass
 class Lam(Term):
@@ -164,5 +162,3 @@ class Sort(Term):
         return bindings.Term.init_sort(level_binding)
 
 Set = Sort(0)
-
-type TermUnion = Ann | App | Ctor | DataType | Lam | Pi | Sort | Var

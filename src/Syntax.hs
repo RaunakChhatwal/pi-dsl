@@ -29,11 +29,21 @@ levelToInt (Succ level) = 1 + levelToInt level
 instance Show Level where
   show = show . levelToInt
 
+data Var = Local TermName | Global String
+  deriving (Show, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
+
+lVar :: TermName -> Term
+lVar = Var . Local
+
+-- instance Unbound.Subst Term Var where
+--   isvar (Local name) = Just $ Unbound.SubstName name
+--   isvar _ = Nothing
+
 -- | basic language
 data Term
   = Sort Level
   | -- | variable `x`
-    Var TermName
+    Var Var
   | -- | abstraction  `\x. a`
     Lam (Unbound.Bind TermName Term)
   | -- | application `a b`
@@ -58,7 +68,7 @@ data Pattern = PatVar TermName | PatCon DataTypeName [Pattern]
 
 type DataTypeName = String
 type CtorName = String
-data Entry = Decl TermName Type Term | Data DataTypeName Type [(CtorName, Type)]
+data Entry = Decl String Type Term | Data DataTypeName Type [(CtorName, Type)]
   deriving (Show, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
 -- * `Alpha` class instances
@@ -88,5 +98,5 @@ instance Unbound.Alpha Term where
 -- The `isvar` function identifies the variables in the term that
 -- should be substituted for.
 instance Unbound.Subst Term Term where
-  isvar (Var x) = Just (Unbound.SubstName x)
+  isvar (Var (Local name)) = Just (Unbound.SubstName name)
   isvar _ = Nothing

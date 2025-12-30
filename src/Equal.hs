@@ -5,7 +5,7 @@ import qualified Unbound.Generics.LocallyNameless as Unbound
 import Environment (err, lookupDecl, TcMonad, traceM)
 import Inductive (reduceRecursor, unfoldApps)
 import PrettyPrint (D(DS, DD), ppr)
-import Syntax (Term(..))
+import Syntax (Term(..), Var(Global))
 
 -- compare two expressions for equality, only accepts well typed arguments
 equate :: Term -> Term -> TcMonad ()
@@ -26,9 +26,9 @@ equate term1 term2 = traceM "equate" [ppr term1, ppr term2] (const "") $
 -- Convert a term to its weak-head normal form, only accepts well typed terms
 whnf :: Term -> TcMonad Term
 whnf term = traceM "whnf" [ppr term] ppr $ case term of
-  Var var -> lookupDecl var >>= \case
+  Var (Global var) -> lookupDecl var >>= \case
     Just (_, def) -> whnf def
-    _ -> return $ Var var
+    _ -> return $ Var $ Global var  -- TODO: throw here?
 
   term@(App _ _) -> do
     (func, args) <- unfoldApps term

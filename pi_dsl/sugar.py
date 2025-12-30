@@ -45,7 +45,7 @@ def remove_stub(term: Term, self: DataType) -> Term:
                     return Pi(params, return_type)
                 case param:
                     return Pi(remove_stub_from_param(param, self), return_type)
-        case DataType() | Sort() | Var():
+        case DataType() | Global() | Sort() | Var():
             return term
         case _:
             assert isinstance(term, SelfSingleton)
@@ -82,7 +82,7 @@ def decl(env: Env):
             [(Var(name), param.annotation.hint) for name, param in signature_.parameters.items()]
         signature = Pi(params, signature_.return_annotation.hint)
 
-        var = Var(func.__name__)
+        var = Global(func.__name__)
         env.declare(var, signature, lam(func))
         return var
 
