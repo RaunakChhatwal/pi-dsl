@@ -14,12 +14,6 @@ equate term1 term2 = traceM "equate" [ppr term1, ppr term2] (const "") $
     (Lam bind1, Lam bind2) -> do
       (var, body1, _, body2) <- lift $ Unbound.unbind2Plus bind1 bind2
       equate body1 body2
-    (Lam bind1, nf2) -> do
-      (var, body) <- Unbound.unbind bind1
-      equate body (App nf2 (Var var))
-    (nf1, Lam bind2) -> do
-      (var, body) <- Unbound.unbind bind2
-      equate (App nf1 (Var var)) body
     (App func1 arg1, App func2 arg2) ->
       equate func1 func2 >> equate arg1 arg2
     (Pi paramType1 bind1, Pi paramType2 bind2) -> do
