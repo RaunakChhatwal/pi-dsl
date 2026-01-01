@@ -59,13 +59,6 @@ data Term
   | Rec DataTypeName -- recursors
   deriving (Show, Generic)
 
--- | A 'Match' represents a case alternative
-newtype Match = Match (Unbound.Bind Pattern Term)
-  deriving (Show, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
-
-data Pattern = PatVar TermName | PatCon DataTypeName [Pattern]
-  deriving (Show, Eq, Generic, Unbound.Alpha, Unbound.Subst Term)
-
 type DataTypeName = String
 type CtorName = String
 data Entry = Decl String Type Term | Data DataTypeName Type [(CtorName, Type)]

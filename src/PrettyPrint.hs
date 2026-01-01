@@ -109,10 +109,6 @@ instance Disp Entry
 
 instance Disp [Entry]
 
-instance Disp Pattern
-
-instance Disp Match
-
 
 instance Display [Entry] where
   display ds = do
@@ -309,23 +305,6 @@ instance Display Term where
   display (DataType typeName) = display typeName
   display (Ctor typeName ctorName) = display @String [i|#{typeName}.#{ctorName}|]
   display (Rec typeName) = display @String [i|#{typeName}.rec|]
-
-instance Display Match where
-  display (Match bd) =
-    Unbound.lunbind bd $ \(pat, ubd) -> do
-      dpat <- display pat
-      dubd <- display ubd
-      return $ PP.hang (dpat <+> PP.text "->") 2 dubd
-
--- instance Display PatCtorArg where
---   display (RelArg pat) = display pat
---   display (IrrVar var) = bindParens Irr <$> display var
-
-instance Display Pattern where
-  display (PatVar var) = display var
-  display (PatCon ctor []) = display ctor
-  display (PatCon ctor args) = (<+>) <$> display ctor <*> argsDoc where
-    argsDoc = PP.hsep <$> mapM display args
 
 -------------------------------------------------------------------------
 
