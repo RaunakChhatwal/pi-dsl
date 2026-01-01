@@ -20,7 +20,7 @@ The Haskell implementation is a fork of the educational pi-forall language by St
 
 #### Key Modules:
 
-- **`Syntax.hs`**: AST (`Sort`, `Var`, `Lam`, `App`, `Pi`, `Ann`, `DataType`, `Ctor`, `Rec`); also defines `Match`/`Pattern` helpers (not a `Term` form)
+- **`Syntax.hs`**: AST (`Sort`, `Var`, `Lam`, `App`, `Pi`, `Ann`, `DataType`, `Ctor`, `Rec`)
 - **`TypeCheck.hs`**: Bidirectional checking (`inferType`, `checkType`, `tcEntries`)
 - **`Environment.hs`**: `TcMonad`, `Env` (datatypes/decls/locals), tracing, and pretty-printed `Err` (no source spans)
 - **`Inductive.hs`**: Inductive checking + recursor synthesis/reduction (positivity checking)
@@ -32,8 +32,8 @@ The Haskell implementation is a fork of the educational pi-forall language by St
 ### 2. Foreign Function Interface (FFI) Bridge
 
 #### `Export.hs` - Haskell Export Module:
-- Exposes FFI entry points: `bind`, `unbind`, `ppr_term`, `type_check`, `trace_type_check`, `infer_type`, `check_type`
-- Runtime init/exit lives in `export.c` (`pi_dsl_init`/`pi_dsl_exit`)
+- Exposes FFI entry points: `bind`, `unbind`, `ppr_term`, `type_check`, `infer_type`, `check_type`
+- Runtime init/exit lives in `export/export.c` (`pi_dsl_init`/`pi_dsl_exit`)
 - Uses `FFI.hs` helpers to generate `Storable` instances and C-callable wrapper exports
 
 #### `FFI.hs` - FFI Helpers:
@@ -52,7 +52,7 @@ The Haskell implementation is a fork of the educational pi-forall language by St
 - Python term constructors (`Ann`, `App`, `Ctor`, `DataType`, `Lam`, `Pi`, `Rec`, `Sort`, `Var`) with `binding()` → Haskell
 
 #### `env.py` (+ `tracing.py`):
-- Incremental environment (`Env`, `Decl`) that calls the kernel and raises `KernelError` with trace trees
+- Incremental environment (`Env`, `Decl`) that calls haskell and raises `PiDslError` with trace trees
 
 #### `sugar.py` / `std.py`:
 - Decorators (`@datatype`, `@decl`), `Self` stub replacement, and a small standard library (`Bool`, `Nat`, `Eq`, `add`, `sym`, `trans`, `cong`)
@@ -68,5 +68,5 @@ The Haskell implementation is a fork of the educational pi-forall language by St
 ### Type Checking Workflow:
 
 1. Build Python terms (`term.py`/`sugar.py`) and environment entries (`env.py`)
-2. Convert to Haskell via `binding()` and call the exported kernel
+2. Convert to Haskell via `binding()` and call into Haskell
 3. Return either a type/result or an error plus traces (`tracing.py`)

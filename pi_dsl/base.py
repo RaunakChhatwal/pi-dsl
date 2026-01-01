@@ -7,16 +7,17 @@ from typing import Any, cast, Optional, TypeVar
 import weakref
 
 here = Path(__file__).resolve().parent
-bundled = here / "_native" / "libpi-dsl-shared-lib.so"
+lib_name = "libpi-dsl-shared-lib.so"
+bundled = here / "_native" / lib_name
 if bundled.exists():
     lib = ctypes.CDLL(bundled)
 else:
     artifacts_root = here.parent / "dist-newstyle"
-    error = Exception("Couldn't find kernel")
+    error = Exception(f"Couldn't find {lib_name}")
     if not artifacts_root.exists():
         raise error
 
-    if match := next(artifacts_root.rglob("libpi-dsl-shared-lib.so"), None):
+    if match := next(artifacts_root.rglob(lib_name), None):
         lib = ctypes.CDLL(match)
     else:
         raise error
