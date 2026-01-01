@@ -2,7 +2,7 @@ module Equal (whnf, equate) where
 
 import Control.Monad.Trans (lift)
 import qualified Unbound.Generics.LocallyNameless as Unbound
-import Environment (err, lookupDecl, TcMonad, traceM)
+import Environment (err, lookUpDecl, TcMonad, traceM)
 import Inductive (reduceRecursor, unfoldApps)
 import PrettyPrint (D(DS, DD), ppr)
 import Syntax (Term(..), Var(Global))
@@ -26,7 +26,7 @@ equate term1 term2 = traceM "equate" [ppr term1, ppr term2] (const "") $
 -- Convert a term to its weak-head normal form, only accepts well typed terms
 whnf :: Term -> TcMonad Term
 whnf term = traceM "whnf" [ppr term] ppr $ case term of
-  Var (Global var) -> lookupDecl var >>= \case
+  Var (Global var) -> lookUpDecl var >>= \case
     Just (_, def) -> whnf def
     _ -> return $ Var $ Global var  -- TODO: throw here?
 

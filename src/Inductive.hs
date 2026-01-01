@@ -4,12 +4,13 @@ module Inductive
 
 import Control.Exception (assert)
 import Control.Monad ((>=>), forM, when, forM_)
+import Control.Monad.Reader (local)
 import Data.Bifunctor (second, first)
 import Data.Foldable (find)
 import Data.Functor ((<&>))
 import Data.Maybe (fromJust)
 import Unbound.Generics.LocallyNameless qualified as Unbound
-import Environment (addDataType, err, lookupDataType, TcMonad, traceM)
+import Environment (addDataType, err, lookUpDataType, TcMonad, traceM, Env(dataTypeBeingDeclared))
 import {-# SOURCE #-} Equal (whnf)
 import PrettyPrint (D(DS, DD), ppr)
 import Syntax (CtorName, DataTypeName, Term(..), TermName, Type, lVar)
@@ -79,7 +80,7 @@ motiveFromSelf motive selfName typeName paramNames = whnf >=> \case
 
 synthesizeRecursorType :: DataTypeName -> TcMonad Type
 synthesizeRecursorType typeName = do
-  (signature, ctorDefs) <- lookupDataType typeName
+  (signature, ctorDefs) <- lookUpDataType typeName
 
   -- Use fresh binder names to avoid capturing user variables like `motive`/`self`.
   motive <- freshName "motive"
@@ -135,7 +136,7 @@ reduceRecursor :: DataTypeName -> [Term] -> TcMonad (Maybe Term)
 reduceRecursor _ [] = return Nothing
 reduceRecursor typeName (motive:args) =
   traceM "reduceRecursor" (typeName : ppr motive : map ppr args) ppr $ do
-    (typeSignature, ctors) <- lookupDataType typeName
+    (typeSignature, ctors) <- lookUpDataType typeName
     numTypeParams <- length . fst <$> unfoldPi typeSignature
     splitReducerArgs (length ctors) numTypeParams args >>= \case
       Nothing -> return Nothing
@@ -155,8 +156,6 @@ checkCtorReturnsSelf ctorName self _ =
 
 throwIfFound :: DataTypeName -> Type -> TcMonad ()
 throwIfFound typeName type' = whnf type' >>= \case
-  Sort _ -> return ()
-  Var _ -> return ()
   Lam bind -> do
     (_, body) <- Unbound.unbind bind
     throwIfFound typeName body
@@ -165,12 +164,9 @@ throwIfFound typeName type' = whnf type' >>= \case
     throwIfFound typeName paramType
     (_, returnType) <- Unbound.unbind bind
     throwIfFound typeName returnType
-  Ann term _ -> throwIfFound typeName term
   DataType name -> when (name == typeName) $
     err [DS "Invalid recursive occurrence of data type", DD typeName, DS "during declaration"]
-  Ctor _ _ -> return ()
-  Rec name -> when (name == typeName) $
-    err [DS "Recursor of", DD typeName, DS "not valid during its declaration"]
+  _ -> return ()
 
 checkStrictPositivity :: DataTypeName -> Type -> TcMonad ()
 checkStrictPositivity self paramType = whnf paramType >>= \case
@@ -188,8 +184,8 @@ checkDataTypeDecl typeName typeSignature ctors = do
   _ <- ensureType typeSignature
   _ <- ensureType . snd =<< unfoldPi typeSignature
   forM_ ctors $ \(ctorName, ctorType) -> do
-    let message = "Unreachable: attempted access to data type definition during declaration"
-    _ <- addDataType typeName typeSignature (error message) $ ensureType ctorType
+    let addSelfToEnv env = env { dataTypeBeingDeclared = Just (typeName, typeSignature) }
+    _ <- local addSelfToEnv $ ensureType ctorType
     (paramTypes, returnType) <- unfoldPi ctorType
     checkCtorReturnsSelf ctorName typeName =<< Equal.whnf returnType
     mapM (checkStrictPositivity typeName) paramTypes

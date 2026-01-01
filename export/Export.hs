@@ -64,7 +64,7 @@ instance F.Storable a => F.Storable [a] where
     F.pokeByteOff ptr 0 len
     F.pokeByteOff ptr dataOffset dataPtr
 
-$(mapM (fmap fromJust . implStorable) [''Maybe, ''Either, ''Trace])
+$(mapM (fmap fromJust . implStorable) [''Either, ''Trace])
 $(catMaybes <$> (mapM implStorable =<< buildDeclOrder ''Env))
 $(pure . fromJust <$> implStorable ''Entry)
 
@@ -109,7 +109,7 @@ instance (F.Storable a, F.Storable b, Free a, Free b) => Free (a, b) where
     let bOffset = alignOffsetUp (sizeOf @a) (alignment @b)
     freeInPlace (F.plusPtr (F.castPtr ptr) bOffset :: F.Ptr b)
 
-$(mapM (fmap fromJust . implFree) [''Maybe, ''Either, ''Trace])
+$(mapM (fmap fromJust . implFree) [''Either, ''Trace])
 $(catMaybes <$> (mapM implFree =<< buildDeclOrder ''Env))
 
 $(join $ exportFunction "bind"

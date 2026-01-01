@@ -17,7 +17,7 @@ ensureType term = inferType term >>= \case
 -- Infer/synthesize the type of a term
 inferType :: Term -> TcMonad Type
 inferType term = traceM "inferType" [ppr term] ppr $ case term of
-  Var var -> Env.lookupType var
+  Var var -> Env.lookUpType var
 
   Sort level -> return $ Sort $ Succ level
 
@@ -40,9 +40,9 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
     checkType term type'
     return type'
 
-  DataType typeName -> fst <$> Env.lookupDataType typeName
+  DataType typeName -> Env.lookUpTypeOfDataType typeName
 
-  Ctor typeName ctorName -> Env.lookupCtor (typeName, ctorName)
+  Ctor typeName ctorName -> Env.lookUpCtor (typeName, ctorName)
 
   Rec typeName -> synthesizeRecursorType typeName
 
@@ -64,9 +64,7 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
 
 tcEntry :: Entry -> TcMonad ()
 tcEntry entry = traceM "tcEntry" [ppr entry] (const "") $ case entry of
-  Decl var type' term -> Env.lookupDecl var >>= \case
-    Just _ -> Env.err [DD var, DS "already defined"]
-    Nothing -> ensureType type' >> checkType term type'
+  Decl _ type' term -> ensureType type' >> checkType term type'
   dataDecl@(Data typeName typeParams ctors) -> checkDataTypeDecl typeName typeParams ctors
 
 withEntries :: [Entry] -> TcMonad a -> TcMonad a

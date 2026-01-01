@@ -2,20 +2,6 @@ from __future__ import annotations
 from typing import Literal
 from .base import *
 
-class Maybe[T1](TaggedUnion):
-    kind: Literal[0, 1]
-    
-    KIND_NOTHING = 0
-    KIND_JUST = 1
-    
-    @classmethod
-    def init_just(cls, value: T1):
-        return cls(cls.KIND_JUST, value)
-    
-    def get_just(self) -> T1:
-        assert self.kind == self.KIND_JUST
-        return self.get_field(T1)
-
 class Either[T1, T2](TaggedUnion):
     kind: Literal[0, 1]
     
@@ -239,18 +225,32 @@ class Term(TaggedUnion):
         assert self.kind == self.KIND_REC
         return self.get_field(DataTypeName)
 
+class Maybe[T1](TaggedUnion):
+    kind: Literal[0, 1]
+    
+    KIND_NOTHING = 0
+    KIND_JUST = 1
+    
+    @classmethod
+    def init_just(cls, value: T1):
+        return cls(cls.KIND_JUST, value)
+    
+    def get_just(self) -> T1:
+        assert self.kind == self.KIND_JUST
+        return self.get_field(T1)
+
 class Env(TaggedUnion):
     kind: Literal[0]
     
     KIND_ENV = 0
     
     @classmethod
-    def init_env(cls, *values: *tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type]]):
+    def init_env(cls, *values: *tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type], Maybe[Tuple[DataTypeName, Type]]]):
         return cls(cls.KIND_ENV, init_tuple(*values))
     
-    def get_env(self) -> tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type]]:
+    def get_env(self) -> tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type], Maybe[Tuple[DataTypeName, Type]]]:
         assert self.kind == self.KIND_ENV
-        return self.get_field(Tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type]]).get()
+        return self.get_field(Tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type], Maybe[Tuple[DataTypeName, Type]]]).get()
 
 class Entry(TaggedUnion):
     kind: Literal[0, 1]
