@@ -1,5 +1,5 @@
 from pi_dsl.term import Ctor, Pi, Rec, Set, Sort, Var
-from pi_dsl.env import Env, KernelError
+from pi_dsl.env import Env, PiDslError
 from pi_dsl.std import Bool, env, Eq, Nat
 from pi_dsl.sugar import datatype, DataTypeMeta, Self
 
@@ -30,7 +30,7 @@ try:
     class Bad(metaclass=DataTypeMeta):
         bad: Ctor[Pi(Self, Self) >> Self]
     raise Exception("Bad data type type checked without errors")
-except KernelError:
+except PiDslError:
     pass
 
 try:
@@ -38,5 +38,5 @@ try:
     class Bad2(metaclass=DataTypeMeta):
         bad: Ctor[Self >> Bool]
     raise Exception("Bad data type type checked without errors")
-except KernelError:
+except PiDslError:
     pass

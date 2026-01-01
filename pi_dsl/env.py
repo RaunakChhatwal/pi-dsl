@@ -63,7 +63,7 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
         case bindings.Term.KIND_REC:
             return Rec(env.datatypes[str(binding.get_rec())])
 
-class KernelError(Exception):
+class PiDslError(Exception):
     def __init__(self, message: str, traces: list[tracing.TraceTree]):
         self.message = message
         self.traces = traces
@@ -120,21 +120,21 @@ class Env:
         return [self.get_entry(entry).entry_binding() for entry in self.entries]
 
     def type_check(self):
-        error, traces = \
-            bindings.trace_type_check(List[bindings.Entry](*self.entry_bindings())).get()
+        error, traces = bindings.type_check(List[bindings.Entry](*self.entry_bindings())).get()
         if error.kind == Maybe.KIND_JUST:
-            raise KernelError(str(error.get_just()), tracing.from_bindings(traces.get()))
+            raise PiDslError(str(error.get_just()), tracing.from_bindings(traces.get()))
 
     def infer_type(self, term: Term) -> Term:
-        either = bindings.infer_type(List[bindings.Entry](*self.entry_bindings()), term.binding())
+        either, traces = \
+            bindings.infer_type(List[bindings.Entry](*self.entry_bindings()), term.binding()).get()
         match either.kind:
             case Either.KIND_LEFT:
                 return binding_to_term(either.get_left(), self)
             case Either.KIND_RIGHT:
-                raise TypeError(either.get_right())
+                raise PiDslError(str(either.get_right()), tracing.from_bindings(traces.get()))
 
     def check_type(self, term: Term, type_: Type):
-        error = bindings.check_type(
-            List[bindings.Entry](*self.entry_bindings()), term.binding(), type_.binding())
+        error, traces = bindings.check_type(
+            List[bindings.Entry](*self.entry_bindings()), term.binding(), type_.binding()).get()
         if error.kind == Maybe.KIND_JUST:
-            raise TypeError(error.get_just())
+            raise PiDslError(str(error.get_just()), tracing.from_bindings(traces.get()))

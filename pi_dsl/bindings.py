@@ -296,18 +296,14 @@ set_export_signature("ppr_term", [Term], String)
 def ppr_term(term: Term) -> String:
     return call_export("ppr_term", [term])
 
-set_export_signature("type_check", [List[Entry]], Maybe[String])
-def type_check(entries: List[Entry]) -> Maybe[String]:
+set_export_signature("type_check", [List[Entry]], Tuple[Maybe[String], List[Trace]])
+def type_check(entries: List[Entry]) -> Tuple[Maybe[String], List[Trace]]:
     return call_export("type_check", [entries])
 
-set_export_signature("trace_type_check", [List[Entry]], Tuple[Maybe[String], List[Trace]])
-def trace_type_check(entries: List[Entry]) -> Tuple[Maybe[String], List[Trace]]:
-    return call_export("trace_type_check", [entries])
-
-set_export_signature("infer_type", [List[Entry], Term], Either[Type, String])
-def infer_type(entries: List[Entry], term: Term) -> Either[Type, String]:
+set_export_signature("infer_type", [List[Entry], Term], Tuple[Either[Type, String], List[Trace]])
+def infer_type(entries: List[Entry], term: Term) -> Tuple[Either[Type, String], List[Trace]]:
     return call_export("infer_type", [entries, term])
 
-set_export_signature("check_type", [List[Entry], Term, Type], Maybe[String])
-def check_type(entries: List[Entry], term: Term, type: Type) -> Maybe[String]:
+set_export_signature("check_type", [List[Entry], Term, Type], Tuple[Maybe[String], List[Trace]])
+def check_type(entries: List[Entry], term: Term, type: Type) -> Tuple[Maybe[String], List[Trace]]:
     return call_export("check_type", [entries, term, type])

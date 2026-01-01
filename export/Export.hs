@@ -129,23 +129,18 @@ eitherToMaybe (Left _) = Nothing
 eitherToMaybe (Right error) = Just error
 
 $(join $ exportFunction "type_check"
-  <$> sequence [[t| [Entry] |]]
-  <*> [t| Maybe String |]
-  <*> [| return . eitherToMaybe . runTcMonad . tcEntries |])
-
-$(join $ exportFunction "trace_type_check"
     <$> sequence [[t| [Entry] |]]
     <*> [t| (Maybe String, [Trace]) |]
     <*> [| return . first eitherToMaybe . traceTcMonad . tcEntries |])
 
 $(join $ exportFunction "infer_type"
   <$> sequence [[t| [Entry] |], [t|Term|]]
-  <*> [t| Either Type String |]
-  <*> [| \entries term -> return . runTcMonad $ withEntries entries (inferType term) |])
+  <*> [t| (Either Type String, [Trace]) |]
+  <*> [| \entries term -> return . traceTcMonad $ withEntries entries (inferType term) |])
 
 $(join $ exportFunction "check_type"
   <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]]
-  <*> [t| Maybe String |]
+  <*> [t| (Maybe String, [Trace]) |]
   <*> [| \entries term type' -> do
-            return . eitherToMaybe . runTcMonad $ withEntries entries $
+            return . first eitherToMaybe . traceTcMonad $ withEntries entries $
               ensureType type' >> checkType term type' |])
