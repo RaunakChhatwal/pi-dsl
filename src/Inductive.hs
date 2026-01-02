@@ -1,4 +1,3 @@
-{-# HLINT ignore "Redundant <$>" #-}
 module Inductive
   (checkDataTypeDecl, reduceRecursor, synthesizeRecursorType, unfoldApps, unfoldPi) where
 
@@ -123,14 +122,16 @@ hypothesisForParam typeName paramNames recursor ctorArg = whnf >=> \case
   _ -> return Nothing
 
 argsForCase :: DataTypeName -> Term -> [Term] -> Type -> TcMonad [Term]
-argsForCase typeName recursor ctorArgs ctorType = (, ctorArgs) <$> whnf ctorType >>= \case
-  (Pi paramType bind, ctorArg:restCtorArgs) -> do
-    (_, returnType) <- Unbound.unbind bind
-    restArgs <- argsForCase typeName recursor restCtorArgs returnType
-    hypothesisForParam typeName [] recursor ctorArg paramType <&> \case
-      Nothing -> ctorArg : restArgs
-      Just hypothesis -> ctorArg : hypothesis : restArgs
-  (_, args) -> assert (null args) $ return []
+argsForCase typeName recursor ctorArgs ctorType = do
+  ctorTypeNF <- whnf ctorType
+  case (ctorTypeNF, ctorArgs) of
+    (Pi paramType bind, ctorArg:restCtorArgs) -> do
+      (_, returnType) <- Unbound.unbind bind
+      restArgs <- argsForCase typeName recursor restCtorArgs returnType
+      hypothesisForParam typeName [] recursor ctorArg paramType <&> \case
+        Nothing -> ctorArg : restArgs
+        Just hypothesis -> ctorArg : hypothesis : restArgs
+    (_, args) -> assert (null args) $ return []
 
 reduceRecursor :: DataTypeName -> [Term] -> TcMonad (Maybe Term)
 reduceRecursor _ [] = return Nothing

@@ -15,6 +15,8 @@ import Data.String.Interpolate (i)
 import Control.Monad (forM)
 import Data.Bifunctor (first)
 import Data.Bool (bool)
+import Data.Foldable (find)
+import Data.Maybe (fromJust)
 
 -------------------------------------------------------------------------
 
@@ -256,9 +258,6 @@ showNameExact (Unbound.Bn debruijn id) = [i|#{debruijn}.#{id}|]
 
 instance Display (Unbound.Name Term) where
   display = display . show
-    -- b <- ask showLongNames
-    -- return (if b then debugDisp n else disp n)
-  -- display name = bool (disp name) (disp $ showNameExact name) <$> ask showLongNames
 
 unfoldPi :: (Unbound.LFresh m) => Type -> m ([(TermName, Type)], Type)
 unfoldPi (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) ->
@@ -293,8 +292,9 @@ instance Display Term where
         then fmap PP.parens $ (<+>) . (<+> PP.colon) <$> display paramName <*> display paramType
         else withPrec (levelArrow + 1) (display paramType)
     returnTypeDoc <- display returnType
-    return $ parens (levelArrow < precision) $ PP.sep $
-      head paramDocs : map (PP.text "->" <+>) (tail paramDocs ++ [returnTypeDoc])
+    let arrow = PP.text "->"
+    let docs = paramDocs ++ [returnTypeDoc]
+    return $ parens (levelArrow < precision) $ PP.sep $ PP.punctuate arrow docs
   display (Ann a b) = do
     sa <- ask showAnnots
     if sa then do
@@ -305,12 +305,6 @@ instance Display Term where
   display (DataType typeName) = display typeName
   display (Ctor typeName ctorName) = display @String [i|#{typeName}.#{ctorName}|]
   display (Rec typeName) = display @String [i|#{typeName}.rec|]
-
--------------------------------------------------------------------------
-
--- * Helper functions for displaying terms
-
--------------------------------------------------------------------------
 
 gatherBinders :: Term -> DispInfo -> ([Doc], Doc)
 gatherBinders (Lam b) =
@@ -323,17 +317,12 @@ gatherBinders body = do
   return ([], db)
 
 
--------------------------------------------------------------------------
-
--- * LFresh instance for DisplayInfo reader monad
-
--------------------------------------------------------------------------
-
+-- LFresh instance for DisplayInfo reader monad
 instance Unbound.LFresh ((->) DispInfo) where
   lfresh nm = do
     let s = Unbound.name2String nm
     di <- ask
-    return $ head $
-      filter (\x -> Unbound.AnyName x `S.notMember` dispAvoid di) (map (Unbound.makeName s) [0 ..])
+    return $ fromJust $
+      find (\x -> Unbound.AnyName x `S.notMember` dispAvoid di) (map (Unbound.makeName s) [0 ..])
   getAvoids = asks dispAvoid
   avoid names = local upd where upd di = di { dispAvoid = S.fromList names `S.union` dispAvoid di }

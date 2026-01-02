@@ -34,7 +34,7 @@ whnf term = traceM "whnf" [ppr term] ppr $ case term of
     (func, args) <- unfoldApps term
     funcNF <- whnf func
     case funcNF of
-      Lam bind -> whnf $ foldl App (Unbound.instantiate bind [head args]) (tail args)
+      Lam bind -> whnf $ foldl App (Unbound.instantiate bind [arg]) rest where (arg:rest) = args
       Rec typeName -> reduceRecursor typeName args >>= \case
         Nothing -> return $ foldl App funcNF args
         Just reduced -> whnf reduced
