@@ -3,8 +3,9 @@ module Environment where
 import Control.Monad.Except (MonadError(..), Except, runExcept)
 import Control.Monad.Reader (MonadReader(local), asks, ReaderT(runReaderT))
 import Control.Monad.Trans (lift)
+import Control.Monad.Trans.Maybe (MaybeT)
 import PrettyPrint (D(..), Disp(..), Doc, ppr)
-import Syntax
+import Syntax (CtorName, DataTypeName, Term(..), TermName, Type, Var(Global, Local))
 import Text.PrettyPrint.HughesPJ (($$), sep)
 import qualified Unbound.Generics.LocallyNameless as Unbound
 import Data.Bifunctor (first, second)
@@ -19,17 +20,26 @@ import Control.Monad.State (StateT(runStateT))
 
 data Trace = Invoc String [String] | Event String | Result String
 
-traceM :: String -> [String] -> (a -> String) -> TcMonad a -> TcMonad a
+traceM :: TC m => String -> [String] -> (a -> String) -> m a -> m a
 traceM funcName args toStr monad = do
-  S.yield $ Invoc funcName args
+  yield $ Invoc funcName args
   result <- monad
-  S.yield $ Result $ toStr result
+  yield $ Result $ toStr result
   return result
 
 type TcMonad = Stream (Of Trace) (Unbound.FreshMT (ReaderT Env (Except Err)))
 
-instance Unbound.Fresh TcMonad where
+instance Unbound.Fresh m => Unbound.Fresh (Stream (Of Trace) m) where
   fresh = lift . Unbound.fresh
+
+class (MonadError Err m, MonadReader Env m, Unbound.Fresh m) => TC m where
+  yield :: Trace -> m ()
+
+instance TC TcMonad where
+  yield = S.yield
+
+instance TC m => TC (MaybeT m) where
+  yield = lift . yield
 
 traceTcMonad :: TcMonad a -> (Either String a, [Trace])
 traceTcMonad stream = go stream 0 where
@@ -47,7 +57,7 @@ data Env = Env {
   dataTypeBeingDeclared :: Maybe (DataTypeName, Type)
 }
 
-lookUpDecl :: String -> TcMonad (Maybe (Type, Term))
+lookUpDecl :: TC m => String -> m (Maybe (Type, Term))
 lookUpDecl var = asks (Map.lookup var . decls)
 
 lookUpType :: Var -> TcMonad Type
@@ -73,7 +83,7 @@ addDecl var type' def monad = asks (Map.lookup var . decls) >>= \case
     \env@(Env _ decls _ _) -> env { decls = Map.insert var (type', def) decls }
   Just _ -> err [DS "Name conflict when declaring variable", DD var]
 
-lookUpDataType :: DataTypeName -> TcMonad (Type, [(CtorName, Type)])
+lookUpDataType :: TC m => DataTypeName -> m (Type, [(CtorName, Type)])
 lookUpDataType typeName = asks (Map.lookup typeName . datatypes) >>= \case
   Just dataTypeDef -> return dataTypeDef
   Nothing -> asks dataTypeBeingDeclared >>= \case
@@ -85,9 +95,9 @@ lookUpTypeOfDataType typeName = asks (Map.lookup typeName . datatypes) >>= \case
   Just (typeOfDataType, _) -> return typeOfDataType
   Nothing -> asks dataTypeBeingDeclared >>= \case
     Just (name, typeOfDataType) | name == typeName -> return typeOfDataType
-    Nothing -> err [DS "Data type", DD typeName, DS "not found"]
+    _ -> err [DS "Data type", DD typeName, DS "not found"]
 
-lookUpCtor :: (DataTypeName, CtorName) -> TcMonad Type
+lookUpCtor :: TC m => (DataTypeName, CtorName) -> m Type
 lookUpCtor (typeName, ctorName) = do
   (_, ctorDefs) <- lookUpDataType typeName
   case lookup ctorName ctorDefs of
@@ -120,5 +130,5 @@ instance Disp Err where
   debugDisp = dispErr debugDisp
 
 -- | Throw an error
-err :: Disp a => [a] -> TcMonad b
+err :: TC m => Disp a => [a] -> m b
 err d = throwError $ Err (sep $ map disp d)

@@ -1,5 +1,6 @@
 module Syntax where
 
+import Data.Bifunctor (second)
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import GHC.Generics (Generic, from)
@@ -56,6 +57,11 @@ type DataTypeName = String
 type CtorName = String
 data Entry = Decl String Type Term | Data DataTypeName Type [(CtorName, Type)]
   deriving (Show, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
+
+unfoldApps :: Term -> (Term, [Term])
+unfoldApps term = second reverse (go term) where
+  go (App func arg) = second (arg :) (go func)
+  go term = (term, [])
 
 -- * `Alpha` class instances
 

@@ -7,8 +7,6 @@ tested-with: GHC == 9.8.4
 common shared-properties
   default-language:
     GHC2021
-  -- ghc-options:
-    -- -Wall -fno-warn-unused-matches -fno-warn-orphans -fno-warn-unused-top-binds -fno-warn-unused-imports -fno-warn-name-shadowing -Wno-unrecognised-pragmas
   default-extensions:
     DefaultSignatures
     DeriveAnyClass
@@ -23,6 +21,7 @@ common shared-properties
   build-depends:
     base,
     mtl,
+    transformers,
     pretty,
     unbound-generics,
     containers,

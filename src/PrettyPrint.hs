@@ -264,12 +264,6 @@ unfoldPi (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) -
   first ((paramName, paramType) :) <$> unfoldPi returnType
 unfoldPi returnType = return ([], returnType)
 
-unfoldApp :: Term -> (Term, [Term])
-unfoldApp term = go term []
-  where
-    go (App f x) args = go f (x : args)
-    go f args = (f, args)
-
 piDocs :: Type -> DispInfo -> [Doc]
 piDocs (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) -> do
   paramDoc <- if paramName `elem` toListOf Unbound.fv returnType
@@ -288,7 +282,7 @@ instance Display Term where
     return $ parens (levelLam < n) $ PP.hang (PP.text "\\" PP.<> PP.hsep binds PP.<> PP.text ".") 2 body
   display app@(App f x) = do
     n <- ask prec
-    let (func, args) = unfoldApp app
+    let (func, args) = unfoldApps app
     df <- withPrec levelApp (display func)
     dargs <- mapM (withPrec (levelApp+1) . display) args
     return $ parens (levelApp < n) $ PP.hang df 2 (PP.sep dargs)

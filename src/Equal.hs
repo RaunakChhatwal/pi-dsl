@@ -1,11 +1,12 @@
 module Equal (whnf, equate) where
 
 import Control.Monad.Trans (lift)
+import Control.Monad.Trans.Maybe (runMaybeT)
 import qualified Unbound.Generics.LocallyNameless as Unbound
 import Environment (err, lookUpDecl, TcMonad, traceM)
-import Inductive (reduceRecursor, unfoldApps)
+import Inductive (reduceRecursor)
 import PrettyPrint (D(DS, DD), ppr)
-import Syntax (Term(..), Var(Global))
+import Syntax (Term(..), unfoldApps, Var(Global))
 
 -- compare two expressions for equality, only accepts well typed arguments
 equate :: Term -> Term -> TcMonad ()
@@ -31,11 +32,11 @@ whnf term = traceM "whnf" [ppr term] ppr $ case term of
     Nothing -> err [DS "Global variable", DD var, DS "not found"]
 
   term@(App _ _) -> do
-    (func, args) <- unfoldApps term
+    let (func, args) = unfoldApps term
     funcNF <- whnf func
     case funcNF of
       Lam bind -> whnf $ foldl App (Unbound.instantiate bind [arg]) rest where (arg:rest) = args
-      Rec typeName -> reduceRecursor typeName args >>= \case
+      Rec typeName -> runMaybeT (reduceRecursor typeName args) >>= \case
         Nothing -> return $ foldl App funcNF args
         Just reduced -> whnf reduced
       _ | Unbound.aeq func funcNF -> return term

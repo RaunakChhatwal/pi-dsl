@@ -1,18 +1,21 @@
-module Inductive
-  (checkDataTypeDecl, reduceRecursor, synthesizeRecursorType, unfoldApps, unfoldPi) where
+module Inductive (checkDataTypeDecl, reduceRecursor, synthesizeRecursorType, unfoldPi) where
 
+import Control.Applicative (Alternative(empty))
 import Control.Exception (assert)
-import Control.Monad ((>=>), forM, when, forM_)
+import Control.Monad ((>=>), forM, forM_, guard, when)
 import Control.Monad.Reader (local)
+import Control.Monad.Trans (lift)
+import Control.Monad.Trans.Maybe (MaybeT)
 import Data.Bifunctor (second, first)
 import Data.Foldable (find)
 import Data.Functor ((<&>))
 import Data.Maybe (fromJust)
 import Unbound.Generics.LocallyNameless qualified as Unbound
-import Environment (addDataType, err, lookUpDataType, TcMonad, traceM, Env(dataTypeBeingDeclared))
+import Environment
+  (addDataType, err, lookUpDataType, TC, TcMonad, traceM, Env(dataTypeBeingDeclared))
 import {-# SOURCE #-} Equal (whnf)
 import PrettyPrint (D(DS, DD), ppr)
-import Syntax (CtorName, DataTypeName, Term(..), TermName, Type, lVar)
+import Syntax (CtorName, DataTypeName, lVar, Term(..), TermName, Type, unfoldApps)
 import {-# SOURCE #-} TypeCheck (checkType, ensureType)
 
 
@@ -93,61 +96,60 @@ synthesizeRecursorType typeName = do
   motiveParam <- motiveFromSelf motive selfName typeName [] signature
   return $ addParam (motive, motiveType) $ foldr (addParam . (hole,)) motiveParam cases
 
-unfoldApps :: Term -> TcMonad (Term, [Term])
-unfoldApps term = second reverse <$> go term where
-  go (App func arg) = second (arg :) <$> go func
-  go term = return (term, [])
-
-unfoldPi :: Type -> TcMonad ([Type], Type)
+unfoldPi :: TC m => Type -> m ([Type], Type)
 unfoldPi (Pi paramType bind) = do
   (_, returnType) <- Unbound.unbind bind
   first (paramType :) <$> unfoldPi returnType
 unfoldPi returnType = return ([], returnType)
 
-splitReducerArgs :: Int -> Int -> [Term] -> TcMonad (Maybe ([Term], ([Term], (Term, [Term]))))
-splitReducerArgs 0 0 (scrutinee : rest) = return $ Just ([], ([], (scrutinee, rest)))
-splitReducerArgs 0 m (arg : rest) = fmap (second $ first (arg:)) <$> splitReducerArgs 0 (m - 1) rest
-splitReducerArgs n m (arg : rest) = fmap (first (arg :)) <$> splitReducerArgs (n - 1) m rest
-splitReducerArgs _ _ _ = return Nothing
+splitReducerArgs :: Int -> Int -> [Term] -> MaybeT TcMonad ([Term], (Term, [Term]))
+splitReducerArgs 0 0 (scrutinee : rest) = return ([], (scrutinee, rest))
+splitReducerArgs 0 m (_ : rest) = splitReducerArgs 0 (m - 1) rest
+splitReducerArgs n m (arg : rest) = first (arg :) <$> splitReducerArgs (n - 1) m rest
+splitReducerArgs _ _ _ = empty
 
-hypothesisForParam :: DataTypeName -> [TermName] -> Term -> Term -> Type -> TcMonad (Maybe Term)
-hypothesisForParam typeName paramNames recursor ctorArg = whnf >=> \case
-  Pi paramType bind -> do
-    (paramName, returnType) <- Unbound.unbind bind
-    fmap (Lam  . Unbound.bind paramName) <$>
-      hypothesisForParam typeName (paramName : paramNames) recursor ctorArg returnType
-  App typeCtor _ -> hypothesisForParam typeName paramNames recursor ctorArg typeCtor
-  DataType name | name == typeName ->
-    return $ Just $ App recursor $ foldl App ctorArg $ map lVar $ reverse paramNames
-  _ -> return Nothing
+hypothesisForParam ::
+  DataTypeName -> Term -> Type -> [(TermName, Term)] -> Term -> TcMonad (Maybe Term)
+hypothesisForParam typeName partialRecursor paramType prevCtorArgs ctorArg = go paramType [] []
+  where
+    go paramType typeArgs paramNames = whnf paramType >>= \case
+      Pi _ bind -> do
+        (paramName, returnType) <- Unbound.unbind bind
+        fmap (Lam  . Unbound.bind paramName) <$> go returnType typeArgs (paramName : paramNames)
+      App typeCtor typeArg ->
+        go typeCtor (Unbound.substs prevCtorArgs typeArg : typeArgs) paramNames
+      DataType name | name == typeName -> return $ Just recursor where
+        recursor = App recursorWithTypeArgs scrutinee
+        scrutinee = foldl App ctorArg $ map lVar $ reverse paramNames
+        recursorWithTypeArgs = foldl App partialRecursor typeArgs
+      _ -> return Nothing
 
 argsForCase :: DataTypeName -> Term -> [Term] -> Type -> TcMonad [Term]
-argsForCase typeName recursor ctorArgs ctorType = do
-  ctorTypeNF <- whnf ctorType
-  case (ctorTypeNF, ctorArgs) of
-    (Pi paramType bind, ctorArg:restCtorArgs) -> do
-      (_, returnType) <- Unbound.unbind bind
-      restArgs <- argsForCase typeName recursor restCtorArgs returnType
-      hypothesisForParam typeName [] recursor ctorArg paramType <&> \case
-        Nothing -> ctorArg : restArgs
-        Just hypothesis -> ctorArg : hypothesis : restArgs
-    (_, args) -> assert (null args) $ return []
+argsForCase typeName partialRecursor ctorArgs ctorType = go ctorType ctorArgs [] where
+  go ctorType ctorArgs prevCtorArgs = do
+    ctorTypeNF <- whnf ctorType
+    case (ctorTypeNF, ctorArgs) of
+      (Pi paramType bind, ctorArg:restCtorArgs) -> do
+        (paramName, returnType) <- Unbound.unbind bind
+        restArgs <- go returnType restCtorArgs $ (paramName, ctorArg) : prevCtorArgs
+        hypothesisForParam typeName partialRecursor paramType prevCtorArgs ctorArg <&> \case
+          Nothing -> ctorArg : restArgs
+          Just hypothesis -> ctorArg : hypothesis : restArgs
+      (_, args) -> assert (null args) $ return []
 
-reduceRecursor :: DataTypeName -> [Term] -> TcMonad (Maybe Term)
-reduceRecursor _ [] = return Nothing
+reduceRecursor :: DataTypeName -> [Term] -> MaybeT TcMonad Term
+reduceRecursor _ [] = empty
 reduceRecursor typeName (motive:args) =
   traceM "reduceRecursor" (typeName : ppr motive : map ppr args) ppr $ do
     (typeSignature, ctors) <- lookUpDataType typeName
-    numTypeParams <- length . fst <$> unfoldPi typeSignature
-    splitReducerArgs (length ctors) numTypeParams args >>= \case
-      Nothing -> return Nothing
-      Just (cases, (typeArgs, (scrutinee, extraArgs))) -> whnf scrutinee >>= unfoldApps >>= \case
-        (Ctor scrutineeTypeName ctorName, ctorArgs) | scrutineeTypeName == typeName -> do
-          let recursor = foldl App (Rec typeName) $ motive : cases ++ typeArgs
-          let ((_, ctorType), case') = fromJust $ find ((ctorName ==) . fst . fst) (zip ctors cases)
-          caseArgs <- argsForCase typeName recursor ctorArgs ctorType
-          return $ Just $ foldl App case' $ caseArgs ++ extraArgs
-        _ -> return Nothing
+    numTypeIndices <- length . fst <$> unfoldPi typeSignature
+    (cases, (scrutinee, extraArgs)) <- splitReducerArgs (length ctors) numTypeIndices args
+    (Ctor scrutineeTypeName ctorName, ctorArgs) <- unfoldApps <$> lift (whnf scrutinee)
+    guard $ scrutineeTypeName == typeName
+    let partialRecursor = foldl App (Rec typeName) (motive : cases)
+    let ((_, ctorType), case') = fromJust $ find ((ctorName ==) . fst . fst) (zip ctors cases)
+    caseArgs <- lift $ argsForCase typeName partialRecursor ctorArgs ctorType
+    return $ foldl App case' $ caseArgs ++ extraArgs
 
 checkCtorReturnsSelf :: CtorName -> DataTypeName -> Type -> TcMonad ()
 checkCtorReturnsSelf _ self (DataType typeName) | typeName == self = return ()
