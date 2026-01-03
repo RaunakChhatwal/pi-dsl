@@ -129,9 +129,9 @@ class Env:
             bindings.infer_type(List[bindings.Entry](*self.entry_bindings()), term.binding()).get()
         match either.kind:
             case Either.KIND_LEFT:
-                return binding_to_term(either.get_left(), self)
+                raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
             case Either.KIND_RIGHT:
-                raise PiDslError(str(either.get_right()), tracing.from_bindings(traces.get()))
+                return binding_to_term(either.get_right(), self)
 
     def check_type(self, term: Term, type_: Type):
         error, traces = bindings.check_type(

@@ -257,7 +257,7 @@ showNameExact (Unbound.Fn name id) = [i|#{name}.#{id}|]
 showNameExact (Unbound.Bn debruijn id) = [i|#{debruijn}.#{id}|]
 
 instance Display (Unbound.Name Term) where
-  display = display . show
+  display = display . showNameExact
 
 unfoldPi :: (Unbound.LFresh m) => Type -> m ([(TermName, Type)], Type)
 unfoldPi (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) ->
@@ -270,9 +270,17 @@ unfoldApp term = go term []
     go (App f x) args = go f (x : args)
     go f args = (f, args)
 
+piDocs :: Type -> DispInfo -> [Doc]
+piDocs (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) -> do
+  paramDoc <- if paramName `elem` toListOf Unbound.fv returnType
+    then fmap PP.parens $ (<+>) . (<+> PP.colon) <$> display paramName <*> display paramType
+    else withPrec (levelArrow + 1) (display paramType)
+  (paramDoc :) <$> piDocs returnType
+piDocs returnType = pure <$> display returnType
+
 instance Display Term where
-  display (Sort Zero) = return $ PP.text "Type"
-  display (Sort level) = return $ PP.text ("Type" ++ show level)
+  display (Sort Zero) = return $ PP.text "Set"
+  display (Sort level) = return $ PP.text ("Sort" ++ show level)
   display (Var var) = display var
   display a@(Lam b) = do
     n <- ask prec
@@ -286,15 +294,15 @@ instance Display Term where
     return $ parens (levelApp < n) $ PP.hang df 2 (PP.sep dargs)
   display piType@(Pi _ _) = do
     precision <- ask prec
-    (params, returnType) <- unfoldPi piType
-    paramDocs <- forM params $ \(paramName, paramType) ->
-      if paramName `elem` toListOf Unbound.fv returnType
-        then fmap PP.parens $ (<+>) . (<+> PP.colon) <$> display paramName <*> display paramType
-        else withPrec (levelArrow + 1) (display paramType)
-    returnTypeDoc <- display returnType
-    let arrow = PP.text "->"
-    let docs = paramDocs ++ [returnTypeDoc]
-    return $ parens (levelArrow < precision) $ PP.sep $ PP.punctuate arrow docs
+    -- (params, returnType) <- unfoldPi piType
+    -- paramDocs <- forM params $ \(paramName, paramType) ->
+    --   if paramName `elem` toListOf Unbound.fv returnType
+    --     then fmap PP.parens $ (<+>) . (<+> PP.colon) <$> display paramName <*> display paramType
+    --     else withPrec (levelArrow + 1) (display paramType)
+    -- returnTypeDoc <- display returnType
+    let arrow = PP.space <> PP.text "->"
+    -- let docs = paramDocs ++ [returnTypeDoc]
+    parens (levelArrow < precision) . PP.sep . PP.punctuate arrow <$> piDocs piType
   display (Ann a b) = do
     sa <- ask showAnnots
     if sa then do

@@ -29,7 +29,7 @@ def remove_stub_from_param(param: Param, self: DataType) -> Param:
 def remove_stub(term: Term, self: DataType) -> Term:
     match term:
         case Ann(body, hint):
-            return App(remove_stub(body, self), remove_stub(hint, self))
+            return Ann(remove_stub(body, self), remove_stub(hint, self))
         case App(func, arg):
             return App(remove_stub(func, self), remove_stub(arg, self))
         case Ctor(name, DataType(type_name, type_signature, ctors), signature):

@@ -40,5 +40,5 @@ U, f = Var("U"), Var("f")
 @decl(env)
 def cong(T: Var[Set], U: Var[Set], f: Var[T >> U], a: Var[T], b: Var[T], h: Var[Eq(T, a, b)]
 ) -> Term[Eq(U, f(a), f(b))]:
-    motive = lam(lambda T, a, b, _: Eq(U, f(a), f(b)))
-    return Rec(Eq)(motive, lam(lambda T, a: Eq.refl(U, f(a))))(T, a, b, h)
+    motive = lam(lambda T, a, b, _: Pi([(f, T >> U)], Eq(U, f(a), f(b))))
+    return Rec(Eq)(motive, lam(lambda T, a, f: Eq.refl(U, f(a))))(T, a, b, h, f)

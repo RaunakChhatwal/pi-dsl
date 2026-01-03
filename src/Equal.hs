@@ -28,7 +28,7 @@ whnf :: Term -> TcMonad Term
 whnf term = traceM "whnf" [ppr term] ppr $ case term of
   Var (Global var) -> lookUpDecl var >>= \case
     Just (_, def) -> whnf def
-    _ -> return $ Var $ Global var  -- TODO: throw here?
+    Nothing -> err [DS "Global variable", DD var, DS "not found"]
 
   term@(App _ _) -> do
     (func, args) <- unfoldApps term

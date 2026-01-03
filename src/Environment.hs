@@ -7,7 +7,7 @@ import PrettyPrint (D(..), Disp(..), Doc, ppr)
 import Syntax
 import Text.PrettyPrint.HughesPJ (($$), sep)
 import qualified Unbound.Generics.LocallyNameless as Unbound
-import Data.Bifunctor (first)
+import Data.Bifunctor (first, second)
 import Streaming (Stream, Of)
 import qualified Streaming.Prelude as S
 import Control.Arrow ((&&&))
@@ -15,6 +15,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Foldable (find)
 import Data.String.Interpolate (i)
+import Control.Monad.State (StateT(runStateT))
 
 data Trace = Invoc String [String] | Event String | Result String
 
@@ -30,18 +31,14 @@ type TcMonad = Stream (Of Trace) (Unbound.FreshMT (ReaderT Env (Except Err)))
 instance Unbound.Fresh TcMonad where
   fresh = lift . Unbound.fresh
 
-runTcMonad :: TcMonad a -> Either a String
-runTcMonad stream = fst $ traceTcMonad stream
-
-emptyEnv :: Env
-emptyEnv = Env Map.empty Map.empty Map.empty Nothing
-
-traceTcMonad :: TcMonad a -> (Either a String, [Trace])
-traceTcMonad = go [] where
-  go traces stream = case runExcept $ runReaderT (Unbound.runFreshMT $ S.next stream) emptyEnv of
-    Left error -> (Right $ ppr error, reverse traces)
-    Right (Left result) -> (Left result, reverse traces)
-    Right (Right (trace, rest)) -> go (trace : traces) rest
+traceTcMonad :: TcMonad a -> (Either String a, [Trace])
+traceTcMonad stream = go stream 0 where
+  go stream depth =
+    case runExcept $ runReaderT (runStateT (Unbound.unFreshMT $ S.next stream) depth) emptyEnv of
+      Left error -> (Left $ ppr error, [])
+      Right (Left result, _) -> (Right result, [])
+      Right (Right (trace, restStream), newDepth) -> second (trace :) (go restStream newDepth)
+  emptyEnv = Env Map.empty Map.empty Map.empty Nothing
 
 data Env = Env {
   datatypes :: Map DataTypeName (Type, [(CtorName, Type)]),
@@ -87,7 +84,7 @@ lookUpTypeOfDataType :: DataTypeName -> TcMonad Type
 lookUpTypeOfDataType typeName = asks (Map.lookup typeName . datatypes) >>= \case
   Just (typeOfDataType, _) -> return typeOfDataType
   Nothing -> asks dataTypeBeingDeclared >>= \case
-    Just (_, typeOfDataType) -> return typeOfDataType
+    Just (name, typeOfDataType) | name == typeName -> return typeOfDataType
     Nothing -> err [DS "Data type", DD typeName, DS "not found"]
 
 lookUpCtor :: (DataTypeName, CtorName) -> TcMonad Type

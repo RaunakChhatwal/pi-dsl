@@ -12,7 +12,7 @@ import Data.Maybe (catMaybes, fromJust)
 import Data.Functor ((<&>))
 import Data.String.Interpolate (i)
 import PrettyPrint (ppr)
-import Environment (Env, Err, runTcMonad, TcMonad, Trace, traceTcMonad)
+import Environment (Env, Err, TcMonad, Trace, traceTcMonad)
 import TypeCheck (checkType, ensureType, inferType, tcEntries, withEntries)
 import Control.Monad (join, foldM_, forM_, void, when)
 import qualified Environment as Env
@@ -124,9 +124,9 @@ $(join $ exportFunction "unbind"
 
 $(join $ exportFunction "ppr_term" <$> sequence [[t|Term|]] <*> [t|String|] <*> [| return . ppr |])
 
-eitherToMaybe :: Either () String -> Maybe String
-eitherToMaybe (Left _) = Nothing
-eitherToMaybe (Right error) = Just error
+eitherToMaybe :: Either String () -> Maybe String
+eitherToMaybe (Left error) = Just error
+eitherToMaybe (Right _) = Nothing
 
 $(join $ exportFunction "type_check"
     <$> sequence [[t| [Entry] |]]
@@ -135,7 +135,7 @@ $(join $ exportFunction "type_check"
 
 $(join $ exportFunction "infer_type"
   <$> sequence [[t| [Entry] |], [t|Term|]]
-  <*> [t| (Either Type String, [Trace]) |]
+  <*> [t| (Either String Type, [Trace]) |]
   <*> [| \entries term -> return . traceTcMonad $ withEntries entries (inferType term) |])
 
 $(join $ exportFunction "check_type"

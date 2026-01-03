@@ -300,8 +300,8 @@ set_export_signature("type_check", [List[Entry]], Tuple[Maybe[String], List[Trac
 def type_check(entries: List[Entry]) -> Tuple[Maybe[String], List[Trace]]:
     return call_export("type_check", [entries])
 
-set_export_signature("infer_type", [List[Entry], Term], Tuple[Either[Type, String], List[Trace]])
-def infer_type(entries: List[Entry], term: Term) -> Tuple[Either[Type, String], List[Trace]]:
+set_export_signature("infer_type", [List[Entry], Term], Tuple[Either[String, Type], List[Trace]])
+def infer_type(entries: List[Entry], term: Term) -> Tuple[Either[String, Type], List[Trace]]:
     return call_export("infer_type", [entries, term])
 
 set_export_signature("check_type", [List[Entry], Term, Type], Tuple[Maybe[String], List[Trace]])

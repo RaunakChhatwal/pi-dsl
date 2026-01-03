@@ -1,3 +1,9 @@
+# VERY IMPORTANT:
+1. No defensive programming
+2. No multi-line comments
+3. No excessive indentation
+4. Follow KISS principle
+
 # pi-dsl Architecture Documentation
 
 ## Overview

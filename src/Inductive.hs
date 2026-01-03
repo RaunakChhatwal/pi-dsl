@@ -183,7 +183,10 @@ checkStrictPositivity self paramType = whnf paramType >>= \case
 checkDataTypeDecl :: DataTypeName -> Type -> [(CtorName, Type)] -> TcMonad ()
 checkDataTypeDecl typeName typeSignature ctors = do
   _ <- ensureType typeSignature
-  _ <- ensureType . snd =<< unfoldPi typeSignature
+  (_, returnType) <- unfoldPi typeSignature
+  whnf returnType >>= \case
+    Sort _ -> return ()
+    _ -> err [DS "Expected", DD typeName, DS "signature to return a Sort, but got", DD returnType]
   forM_ ctors $ \(ctorName, ctorType) -> do
     let addSelfToEnv env = env { dataTypeBeingDeclared = Just (typeName, typeSignature) }
     _ <- local addSelfToEnv $ ensureType ctorType

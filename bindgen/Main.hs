@@ -17,7 +17,7 @@ main = putStrLn $(do
   typeCheck <- functionBinding "type_check" ["entries"]
     <$> sequence [[t| [Entry] |]] <*> [t| (Maybe String, [Trace]) |]
   inferType <- functionBinding "infer_type" ["entries", "term"]
-    <$> sequence [[t| [Entry] |], [t|Term|]] <*> [t| (Either Type String, [Trace]) |]
+    <$> sequence [[t| [Entry] |], [t|Term|]] <*> [t| (Either String Type, [Trace]) |]
   checkType <- functionBinding "check_type" ["entries", "term", "type"]
     <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]] <*> [t| (Maybe String, [Trace]) |]
   unbind <- functionBinding "unbind" ["binding"]

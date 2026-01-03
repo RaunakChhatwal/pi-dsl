@@ -29,7 +29,7 @@ levelToInt (Succ level) = 1 + levelToInt level
 instance Show Level where
   show = show . levelToInt
 
-data Var = Local TermName | Global String
+data Var = Local TermName | Global String -- | Meta Int
   deriving (Show, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
 lVar :: TermName -> Term
@@ -42,20 +42,13 @@ lVar = Var . Local
 -- | basic language
 data Term
   = Sort Level
-  | -- | variable `x`
-    Var Var
-  | -- | abstraction  `\x. a`
-    Lam (Unbound.Bind TermName Term)
-  | -- | application `a b`
-    App Term Term
-  | -- | function type `(x : A) -> B`
-    Pi Type (Unbound.Bind TermName Type)
-  | -- | annotated terms `( a : A )`
-    Ann Term Type
-  | -- | type constructors (fully applied)
-    DataType DataTypeName
-  | -- | term constructors (fully applied)
-    Ctor DataTypeName CtorName
+  | Var Var
+  | Lam (Unbound.Bind TermName Term)
+  | App Term Term
+  | Pi Type (Unbound.Bind TermName Type)
+  | Ann Term Type
+  | DataType DataTypeName
+  | Ctor DataTypeName CtorName
   | Rec DataTypeName -- recursors
   deriving (Show, Generic)
 
