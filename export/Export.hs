@@ -6,18 +6,13 @@ import Foreign qualified as F
 import Foreign.C.Types qualified as F
 import Bindings (buildDeclOrder)
 import FFI
-import Syntax(Entry(Data, Decl), Term, TermName, Type)
+import Syntax(Entry, Term, TermName, Type)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)
-import Data.Functor ((<&>))
-import Data.String.Interpolate (i)
 import PrettyPrint (ppr)
-import Environment (Env, Err, TcMonad, Trace, traceTcMonad)
+import Environment (Env, Trace, traceTcMonad)
 import TypeCheck (checkType, ensureType, inferType, tcEntries, withEntries)
-import Control.Monad (join, foldM_, forM_, void, when)
-import qualified Environment as Env
-import Control.Monad.Trans (liftIO)
-import Data.List (intercalate)
+import Control.Monad (join, forM_, when)
 import Data.Bifunctor (first)
 import Unbound.Generics.LocallyNameless.Unsafe (unsafeUnbind)
 

@@ -8,14 +8,11 @@ import PrettyPrint (D(..), Disp(..), Doc, ppr)
 import Syntax (CtorName, DataTypeName, Term(..), TermName, Type, Var(Global, Local))
 import Text.PrettyPrint.HughesPJ (($$), sep)
 import qualified Unbound.Generics.LocallyNameless as Unbound
-import Data.Bifunctor (first, second)
+import Data.Bifunctor (second)
 import Streaming (Stream, Of)
 import qualified Streaming.Prelude as S
-import Control.Arrow ((&&&))
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Foldable (find)
-import Data.String.Interpolate (i)
 import Control.Monad.State (StateT(runStateT))
 
 data Trace = Invoc String [String] | Event String | Result String
@@ -122,7 +119,7 @@ instance Monoid Err where
   mempty = Err mempty
 
 dispErr :: (forall a. Disp a => a -> Doc) -> Err -> Doc
-dispErr disp (Err msg) = msg
+dispErr _ (Err msg) = msg
 
 instance Disp Err where
   disp :: Err -> Doc

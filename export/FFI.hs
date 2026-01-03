@@ -1,7 +1,7 @@
 module FFI where
 
 import Control.Arrow ((&&&))
-import Control.Monad (zipWithM, join, replicateM, when, forM_)
+import Control.Monad (zipWithM, join, replicateM, when)
 import Data.Bifunctor (second, bimap)
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
@@ -133,7 +133,7 @@ implStorable typeName = TH.reify typeName >>= \case
   TH.TyConI (TH.DataD [] _ typeParamBinds Nothing ctors _) ->
     Just <$> storableForData typeName typeParams (map destructureCtor ctors)
     where typeParams = map (TH.VarT . typeParamName) typeParamBinds
-  TH.TyConI (TH.TySynD _ [] typeSynonym) -> return Nothing
+  TH.TyConI (TH.TySynD _ [] _) -> return Nothing
   TH.TyConI (TH.NewtypeD [] _ [] Nothing ctor _) ->
     Just <$> storableForAlias typeName (destructureCtor ctor)
   typeInfo -> error [i|Type info not implemented: #{TH.pprint typeInfo}|]

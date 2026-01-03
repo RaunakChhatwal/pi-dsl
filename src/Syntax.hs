@@ -1,8 +1,6 @@
 module Syntax where
 
 import Data.Bifunctor (second)
-import Data.Maybe (fromMaybe)
-import Data.Set (Set)
 import GHC.Generics (Generic, from)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 
@@ -35,10 +33,6 @@ data Var = Local TermName | Global String -- | Meta Int
 
 lVar :: TermName -> Term
 lVar = Var . Local
-
--- instance Unbound.Subst Term Var where
---   isvar (Local name) = Just $ Unbound.SubstName name
---   isvar _ = Nothing
 
 -- | basic language
 data Term

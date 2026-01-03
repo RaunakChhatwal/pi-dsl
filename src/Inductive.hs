@@ -6,17 +6,16 @@ import Control.Monad ((>=>), forM, forM_, guard, when)
 import Control.Monad.Reader (local)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT)
-import Data.Bifunctor (second, first)
+import Data.Bifunctor (first)
 import Data.Foldable (find)
 import Data.Functor ((<&>))
 import Data.Maybe (fromJust)
 import Unbound.Generics.LocallyNameless qualified as Unbound
-import Environment
-  (addDataType, err, lookUpDataType, TC, TcMonad, traceM, Env(dataTypeBeingDeclared))
+import Environment (err, lookUpDataType, TC, TcMonad, traceM, Env(dataTypeBeingDeclared))
 import {-# SOURCE #-} Equal (whnf)
 import PrettyPrint (D(DS, DD), ppr)
 import Syntax (CtorName, DataTypeName, lVar, Term(..), TermName, Type, unfoldApps)
-import {-# SOURCE #-} TypeCheck (checkType, ensureType)
+import {-# SOURCE #-} TypeCheck (ensureType)
 
 
 freshName :: String -> TcMonad TermName

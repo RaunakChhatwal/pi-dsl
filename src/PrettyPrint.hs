@@ -4,7 +4,7 @@ module PrettyPrint (Disp (..), D (..), PP.Doc, ppr, debug) where
 import Control.Monad.Reader (MonadReader (ask, local), asks)
 import Data.Set qualified as S
 
-import Text.PrettyPrint (Doc, ($$), (<+>))
+import Text.PrettyPrint (Doc, (<+>))
 import qualified Text.PrettyPrint as PP
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import qualified Unbound.Generics.LocallyNameless.Name as Unbound
@@ -12,9 +12,6 @@ import Unbound.Generics.LocallyNameless.Internal.Fold (toListOf)
 
 import Syntax
 import Data.String.Interpolate (i)
-import Control.Monad (forM)
-import Data.Bifunctor (first)
-import Data.Bool (bool)
 import Data.Foldable (find)
 import Data.Maybe (fromJust)
 
@@ -88,7 +85,7 @@ instance Disp D where
   disp (DS s) = PP.text s
   disp (DD d) = PP.nest 2 $ disp d
 
-  debugDisp d@(DS s) = disp d
+  debugDisp d@(DS _) = disp d
   debugDisp (DD d) = PP.nest 2 $ debugDisp d
 
 instance Disp [D] where
@@ -226,20 +223,8 @@ instance Display Bool where
 
 levelApp :: Int
 levelApp     = 10
-levelIf :: Int
-levelIf      = 0
-levelLet :: Int
-levelLet     = 0
-levelCase :: Int
-levelCase    = 0
 levelLam :: Int
 levelLam     = 0
-levelPi :: Int
-levelPi      = 0
-levelSigma :: Int
-levelSigma   = 0
-levelProd :: Int
-levelProd    = 0
 levelArrow :: Int
 levelArrow   = 5
 
@@ -249,20 +234,12 @@ withPrec p = local (\d -> d { prec = p })
 parens :: Bool -> Doc -> Doc
 parens b = if b then PP.parens else id
 
-brackets :: Bool -> Doc -> Doc
-brackets b = if b then PP.brackets else id
-
 showNameExact :: Unbound.Name a -> String
 showNameExact (Unbound.Fn name id) = [i|#{name}.#{id}|]
 showNameExact (Unbound.Bn debruijn id) = [i|#{debruijn}.#{id}|]
 
 instance Display (Unbound.Name Term) where
   display = display . showNameExact
-
-unfoldPi :: (Unbound.LFresh m) => Type -> m ([(TermName, Type)], Type)
-unfoldPi (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) ->
-  first ((paramName, paramType) :) <$> unfoldPi returnType
-unfoldPi returnType = return ([], returnType)
 
 piDocs :: Type -> DispInfo -> [Doc]
 piDocs (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) -> do
@@ -276,11 +253,11 @@ instance Display Term where
   display (Sort Zero) = return $ PP.text "Set"
   display (Sort level) = return $ PP.text ("Sort" ++ show level)
   display (Var var) = display var
-  display a@(Lam b) = do
+  display a@(Lam _) = do
     n <- ask prec
     (binds, body) <- withPrec levelLam $ gatherBinders a
     return $ parens (levelLam < n) $ PP.hang (PP.text "\\" PP.<> PP.hsep binds PP.<> PP.text ".") 2 body
-  display app@(App f x) = do
+  display app@(App _ _) = do
     n <- ask prec
     let (func, args) = unfoldApps app
     df <- withPrec levelApp (display func)

@@ -1,19 +1,17 @@
 module Bindings where
 
 import Language.Haskell.TH qualified as TH
-import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Functor ((<&>))
 import Data.List (intercalate, elemIndex)
 import Data.Bifunctor (second)
-import Data.Maybe (catMaybes, fromJust, mapMaybe, maybeToList)
+import Data.Maybe (fromJust, mapMaybe)
 import Data.String.Interpolate (i)
 import Control.Monad.Reader (asks, Reader, runReader)
 import Control.Monad.State (StateT (runStateT), get, modify, lift)
 import Control.Exception (assert)
 import Data.Char (toLower, isUpper, toUpper)
-import Control.Monad (zipWithM, join, replicateM)
 import Control.Arrow ((&&&))
 import Data.Either (fromRight, rights)
 import Data.Bifoldable (biList)
