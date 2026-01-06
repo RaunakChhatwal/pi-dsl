@@ -76,7 +76,7 @@ def lam(func: Callable[..., Term]) -> Term:
     return Lam(param_vars, func(*param_vars))
 
 def decl(env: Env):
-    def decorator(func: Callable[..., Term]) -> Term:
+    def decorator(func: Callable[..., Term]) -> Global:
         signature_ = inspect.signature(func)
         params: list[Param] = \
             [(Var(name), param.annotation.hint) for name, param in signature_.parameters.items()]

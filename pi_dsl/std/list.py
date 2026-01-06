@@ -20,5 +20,5 @@ def length(T: Var[Set], xs: Var[List(T)]) -> Term[Nat]:
 def map(T: Var[Set], U: Var[Set], f: Var[T >> U], xs: Var[List(T)]) -> Term[List(U)]:
     motive = lam(lambda T, _: (T >> U) >> List(U))
     nil_case = lam(lambda T, _: List.nil(U))
-    cons_case = lam(lambda T, x, xs, acc, f: List.cons(T, f(x), acc(f)))
+    cons_case = lam(lambda T, x, xs, acc, f: List.cons(U, f(x), acc(f)))
     return Rec(List)(motive, nil_case, cons_case, T, xs, f)

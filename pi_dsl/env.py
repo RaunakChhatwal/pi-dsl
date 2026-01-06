@@ -29,14 +29,13 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
             var_binding = binding.get_var()
             match var_binding.kind:
                 case bindings.Var.KIND_LOCAL:
-                    return Var(str(var_binding.get_local().get_fn()[0]))
+                    return Var.from_binding(var_binding.get_local())
                 case bindings.Var.KIND_GLOBAL:
                     return Global(str(var_binding.get_global()))
-            # return Var(str(binding.get_var().get_fn()[0]))
 
         case bindings.Term.KIND_LAM:
             var, body = unbind(binding.get_lam()).get()
-            return Lam(Var(str(var.get_fn()[0])), binding_to_term(body, env))
+            return Lam(Var.from_binding(var), binding_to_term(body, env))
 
         case bindings.Term.KIND_APP:
             func, arg = binding.get_app()
@@ -45,7 +44,7 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
         case bindings.Term.KIND_PI:
             param_type, bind = binding.get_pi()
             param_name, return_type = unbind(bind).get()
-            param = (Var(str(param_name.get_fn()[0])), binding_to_term(param_type, env))
+            param = (Var.from_binding(param_name), binding_to_term(param_type, env))
             return Pi(param, binding_to_term(return_type, env))
 
         case bindings.Term.KIND_ANN:

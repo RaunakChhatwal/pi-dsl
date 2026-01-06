@@ -54,12 +54,17 @@ class App(Term):
 @dataclass
 class Var(Term):
     name: str
+    id: int = 0
 
     def binding(self) -> bindings.Term:
         return bindings.Term.init_var(bindings.Var.init_local(self.name_binding()))
 
     def name_binding(self) -> TermName:
-        return bindings.Name[bindings.Term].init_fn(String(self.name), Int(0))
+        return bindings.Name[bindings.Term].init_fn(String(self.name), Int(self.id))
+
+    @staticmethod
+    def from_binding(name: TermName) -> Var:
+        return Var(str(name.get_fn()[0]), int(name.get_fn()[1]))
 
 # type Name = str | Var
 
