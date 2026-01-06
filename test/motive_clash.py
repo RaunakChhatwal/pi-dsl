@@ -1,4 +1,4 @@
-from pi_dsl.std import Bool, env
+from pi_dsl.std.bool import Bool, env
 from pi_dsl.sugar import DataTypeMeta, datatype, decl, Self
 from pi_dsl.term import Ctor, Rec, Set, Sort, Term
 

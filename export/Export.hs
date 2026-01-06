@@ -11,7 +11,7 @@ import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)
 import PrettyPrint (ppr)
 import Environment (Env, Trace, traceTcMonad)
-import TypeCheck (checkType, ensureType, inferType, tcEntries, withEntries)
+import TypeCheck (checkClosed, checkType, ensureType, inferType, tcEntries, withEntries)
 import Control.Monad (join, forM_, when)
 import Data.Bifunctor (first)
 import Unbound.Generics.LocallyNameless.Unsafe (unsafeUnbind)
@@ -131,11 +131,15 @@ $(join $ exportFunction "type_check"
 $(join $ exportFunction "infer_type"
   <$> sequence [[t| [Entry] |], [t|Term|]]
   <*> [t| (Either String Type, [Trace]) |]
-  <*> [| \entries term -> return . traceTcMonad $ withEntries entries (inferType term) |])
+  <*> [| \entries term ->
+            return $ traceTcMonad $ withEntries entries $ checkClosed term >> inferType term |])
 
 $(join $ exportFunction "check_type"
   <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]]
   <*> [t| (Maybe String, [Trace]) |]
-  <*> [| \entries term type' -> do
-            return . first eitherToMaybe . traceTcMonad $ withEntries entries $
-              ensureType type' >> checkType term type' |])
+  <*> [| \entries term type' ->
+            return $ first eitherToMaybe $ traceTcMonad $ withEntries entries $ do
+              checkClosed type'
+              _ <- ensureType type'
+              checkClosed term
+              checkType term type' |])

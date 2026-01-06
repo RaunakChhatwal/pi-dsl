@@ -1,16 +1,19 @@
 module TypeCheck where
 
+import Control.Monad (unless)
 import Control.Monad.Trans (lift)
+import Data.List (intercalate)
 import Unbound.Generics.LocallyNameless qualified as Unbound
+import Unbound.Generics.LocallyNameless.Internal.Fold qualified as Unbound
 import Environment (TcMonad, traceM)
 import Environment qualified as Env
 import Equal (equate, whnf)
 import PrettyPrint (D(DS, DD), ppr)
-import Syntax (Entry(Data, Decl), Level(Succ), Term(..), Type, maxLevel)
-import Inductive (checkDataTypeDecl, synthesizeRecursorType, unfoldPi)
+import Syntax (Entry(Data, Decl), Level(Succ), Term(..), TermName, Type, maxLevel)
+import Inductive (checkDataTypeDecl, synthesizeRecursorType)
 
 ensureType :: Term -> TcMonad Level
-ensureType term = inferType term >>= \case
+ensureType term = inferType term >>= whnf >>= \case
   Sort u -> return u
   type' -> Env.err [DS "Expected type but got", DD term, DS "with type", DD type']
 
@@ -62,10 +65,23 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
 
     _ -> flip equate type' =<< inferType term
 
+checkClosed :: Term -> TcMonad ()
+checkClosed term = unless (null freeVars) $
+  Env.err [DS "Expected closed expressions as input but found free variables:",
+           DS $ intercalate ", " $ map Unbound.name2String freeVars]
+  where freeVars :: [TermName] = Unbound.toListOf Unbound.fv term
+
 tcEntry :: Entry -> TcMonad ()
 tcEntry entry = traceM "tcEntry" [ppr entry] (const "") $ case entry of
-  Decl _ type' term -> ensureType type' >> checkType term type'
-  dataDecl@(Data typeName typeParams ctors) -> checkDataTypeDecl typeName typeParams ctors
+  Decl _ type' term -> do
+    checkClosed type'
+    _ <- ensureType type'
+    checkClosed term
+    checkType term type'
+  Data typeName typeSignature ctors -> do
+    checkClosed typeSignature
+    mapM_ (checkClosed . snd) ctors
+    checkDataTypeDecl typeName typeSignature ctors
 
 withEntries :: [Entry] -> TcMonad a -> TcMonad a
 withEntries [] monad = monad

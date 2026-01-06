@@ -1,6 +1,8 @@
-from pi_dsl.term import Rec, Term, Var
-from pi_dsl.std import cong, env, Eq, Nat, trans
+from pi_dsl.std.env import env
+from pi_dsl.std.eq import cong, Eq, trans
+from pi_dsl.std.nat import Nat
 from pi_dsl.sugar import decl, lam
+from pi_dsl.term import Rec, Term, Var
 
 # n + 0 = n
 n = Var("n")

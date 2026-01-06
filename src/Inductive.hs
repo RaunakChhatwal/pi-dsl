@@ -1,4 +1,4 @@
-module Inductive (checkDataTypeDecl, reduceRecursor, synthesizeRecursorType, unfoldPi) where
+module Inductive (checkDataTypeDecl, reduceRecursor, synthesizeRecursorType) where
 
 import Control.Applicative (Alternative(empty))
 import Control.Exception (assert)

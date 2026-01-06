@@ -45,7 +45,7 @@ def remove_stub(term: Term, self: DataType) -> Term:
                     return Pi(params, return_type)
                 case param:
                     return Pi(remove_stub_from_param(param, self), return_type)
-        case DataType() | Global() | Sort() | Var():
+        case DataType() | Global() | Sort() | Rec() | Var():
             return term
         case _:
             assert isinstance(term, SelfSingleton)

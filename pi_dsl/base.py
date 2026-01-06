@@ -85,11 +85,7 @@ class TaggedUnion(Structure, Managed):
 
     def get_field[T](self, field_type_hint: TypeVar | type[T]) -> T:
         field_type = self.concretize_type_hint(field_type_hint)
-        try:
-            field = ctypes.cast(self.union, cast(Any, POINTER(field_type))).contents
-        except TypeError as error:
-            print(field_type)
-            raise error
+        field = ctypes.cast(self.union, cast(Any, POINTER(field_type))).contents
         field.set_parent(self)
         return field
 

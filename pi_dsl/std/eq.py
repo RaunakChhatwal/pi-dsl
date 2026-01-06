@@ -1,23 +1,6 @@
-from .term import Ctor, Pi, Rec, Term, Set, Var
-from .env import Env
-from .sugar import datatype, decl, DataTypeMeta, lam, Self
-
-env = Env()
-
-@datatype(env)
-class Bool(metaclass=DataTypeMeta):
-    false: Ctor[Self]
-    true: Ctor[Self]
-
-n = Var("n")
-@datatype(env)
-class Nat(metaclass=DataTypeMeta):
-    zero: Ctor[Self]
-    succ: Ctor[(n, Self) >> Self]
-
-@decl(env)
-def add(n: Var[Nat], m: Var[Nat]) -> Term[Nat]:
-    return Rec(Nat)(lam(lambda _: Nat), m, lam(lambda _: Nat.succ), n)
+from .env import env
+from ..sugar import datatype, decl, DataTypeMeta, lam, Self
+from ..term import Ctor, Pi, Rec, Term, Set, Var
 
 T, a, b = Var("T"), Var("a"), Var("b")
 @datatype(env, (T, Set) >> ((a, T) >> ((b, T) >> Set)))
@@ -42,3 +25,12 @@ def cong(T: Var[Set], U: Var[Set], f: Var[T >> U], a: Var[T], b: Var[T], h: Var[
 ) -> Term[Eq(U, f(a), f(b))]:
     motive = lam(lambda T, a, b, _: Pi([(f, T >> U)], Eq(U, f(a), f(b))))
     return Rec(Eq)(motive, lam(lambda T, a, f: Eq.refl(U, f(a))))(T, a, b, h, f)
+
+@datatype(env)
+class Void(metaclass=DataTypeMeta):
+    pass
+
+@decl(env)
+def exfalso(T: Var[Set], void: Var[Void]) -> Term[T]:
+    motive = lam(lambda _: T)
+    return Rec(Void)(motive, void)
