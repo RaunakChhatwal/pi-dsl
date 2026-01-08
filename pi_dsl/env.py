@@ -5,16 +5,19 @@ from . import bindings, tracing
 from .bindings import Either, Entry, Maybe, unbind
 from .term import Ann, App, DataType, Global, Lam, Pi, Rec, Sort, Term, Type, Var
 
+# Represents a top-level declaration with a name, type signature, and definition body
 @dataclass
 class Decl:
     var: Global
     signature: Type
     body: Term
 
+    # Converts this declaration to a Haskell Entry binding for type checking
     def entry_binding(self) -> bindings.Entry:
         return bindings.Entry.init_decl(
             String(self.var.name), self.signature.binding(), self.body.binding())
 
+# Converts a Haskell Term binding back into a Python Term AST node
 def binding_to_term(binding: bindings.Term, env: Env) -> Term:
     match binding.kind:
         case bindings.Term.KIND_SORT:
@@ -62,17 +65,20 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
         case bindings.Term.KIND_REC:
             return Rec(env.datatypes[str(binding.get_rec())])
 
+# Exception raised when type checking fails, includes error message and trace trees for debugging
 class PiDslError(Exception):
     def __init__(self, message: str, traces: list[tracing.TraceTree]):
         self.message = message
         self.traces = traces
         super().__init__(message)
 
+# Type checking environment that tracks datatypes and declarations, interfaces with Haskell core
 class Env:
     datatypes: dict[str, DataType]
     decls: dict[str, Decl]
     entries: list[str]
 
+    # Initializes environment with optional datatype and declaration entries
     def __init__(self, *entries: DataType | Decl):
         self.datatypes = {}
         self.decls = {}
@@ -85,6 +91,7 @@ class Env:
                 case Decl():
                     self.declare(entry.var, entry.signature, entry.body)
 
+    # Adds a datatype to the environment and type checks incrementally
     def add_datatype(self, datatype: DataType):
         assert datatype.name not in self.entries
         self.entries.append(datatype.name)
@@ -96,6 +103,7 @@ class Env:
             self.datatypes.pop(datatype.name)
             raise error
 
+    # Adds a declaration with signature and body to the environment, type checks incrementally
     def declare(self, var: Global, hint: Type, defn: Term):
         assert var.name not in self.entries
         self.entries.append(var.name)
@@ -107,6 +115,7 @@ class Env:
             self.decls.pop(var.name)
             raise error
 
+    # Retrieves a datatype or declaration entry by name
     def get_entry(self, name: str) -> DataType | Decl:
         if name in self.datatypes:
             return self.datatypes[name]
@@ -115,14 +124,17 @@ class Env:
         else:
             raise ValueError(f"No entry with name {name}")
 
+    # Converts all entries to Haskell bindings for FFI calls
     def entry_bindings(self) -> list[Entry]:
         return [self.get_entry(entry).entry_binding() for entry in self.entries]
 
+    # Type checks all entries in the environment via the Haskell core
     def type_check(self):
         error, traces = bindings.type_check(List[bindings.Entry](*self.entry_bindings())).get()
         if error.kind == Maybe.KIND_JUST:
             raise PiDslError(str(error.get_just()), tracing.from_bindings(traces.get()))
 
+    # Infers the type of a term in the current environment
     def infer_type(self, term: Term) -> Term:
         either, traces = \
             bindings.infer_type(List[bindings.Entry](*self.entry_bindings()), term.binding()).get()
@@ -132,6 +144,7 @@ class Env:
             case Either.KIND_RIGHT:
                 return binding_to_term(either.get_right(), self)
 
+    # Checks that a term has the expected type in the current environment
     def check_type(self, term: Term, type_: Type):
         error, traces = bindings.check_type(
             List[bindings.Entry](*self.entry_bindings()), term.binding(), type_.binding()).get()

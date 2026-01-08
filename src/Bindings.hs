@@ -1,4 +1,4 @@
-module Bindings where
+module Bindings (bindingFromName, buildDeclOrder, functionBinding, generateBindings) where
 
 import Language.Haskell.TH qualified as TH
 import Data.Set (Set)
@@ -16,23 +16,26 @@ import Control.Arrow ((&&&))
 import Data.Either (fromRight, rights)
 import Data.Bifoldable (biList)
 
-destructureCtor :: TH.Con -> (TH.Name, [TH.Type])
-destructureCtor (TH.NormalC name params) = (name, map snd params)
-destructureCtor (TH.RecC name params) = (name, [paramType | (_, _, paramType) <- params])
-destructureCtor ctor = error [i|Constructor not implemented: #{TH.pprint ctor}|]
+-- Extract constructor name and parameter types from a TH constructor
+ctorNameAndParams :: TH.Con -> (TH.Name, [TH.Type])
+ctorNameAndParams (TH.NormalC name params) = (name, map snd params)
+ctorNameAndParams (TH.RecC name params) = (name, [paramType | (_, _, paramType) <- params])
+ctorNameAndParams ctor = error [i|Constructor not implemented: #{TH.pprint ctor}|]
 
+-- Compute declaration order from type info, collecting dependencies
 declOrderFromTypeInfo :: TH.Info -> StateT (Set TH.Name) TH.Q [TH.Name]
 declOrderFromTypeInfo (TH.TyConI (TH.DataD [] typeName _ Nothing ctors _)) = do
-  let paramTypes = concatMap (snd . destructureCtor) ctors
+  let paramTypes = concatMap (snd . ctorNameAndParams) ctors
   prev <- concat <$> mapM declOrderHelper paramTypes
   return $ prev ++ [typeName]
 declOrderFromTypeInfo (TH.TyConI (TH.TySynD typeName [] typeSynonym)) =
   (++ [typeName]) <$> declOrderHelper typeSynonym
 declOrderFromTypeInfo (TH.TyConI (TH.NewtypeD [] typeName [] Nothing ctor _)) = do
-  prev <- concat <$> mapM declOrderHelper (snd $ destructureCtor ctor)
+  prev <- concat <$> mapM declOrderHelper (snd $ ctorNameAndParams ctor)
   return $ prev ++ [typeName]
 declOrderFromTypeInfo typeInfo = error [i|Type info not implemented: #{TH.pprint typeInfo}|]
 
+-- Helper to traverse types and collect declaration dependencies
 declOrderHelper :: TH.Type -> StateT (Set TH.Name) TH.Q [TH.Name]
 declOrderHelper (TH.ConT typeName) = do
   vis <- get
@@ -49,6 +52,7 @@ declOrderHelper (TH.TupleT 2) = return []
 declOrderHelper (TH.VarT {}) = return []
 declOrderHelper type' = error [i|Type not implemented: #{TH.pprint type'}|]
 
+-- Build topologically sorted declaration order starting from a root type
 buildDeclOrder :: TH.Name -> TH.Q [TH.Name]
 buildDeclOrder root = fst <$> runStateT (declOrderHelper $ TH.ConT root) Set.empty
 
@@ -67,6 +71,7 @@ data TypeBinding =
 -- Python class field: (field_name, field_type)
 type Field = (String, TypeBinding)
 
+-- Python binding: function, type alias, or tagged union class
 data Binding =
   Function String [(String, TypeBinding)] TypeBinding
   | TypeAlias String TypeBinding
@@ -137,6 +142,7 @@ bindingFromName typeName = TH.reify typeName <&> \case
     return $ TypeAlias (TH.nameBase typeName) typeDef
   typeInfo -> error [i|Type info not implemented: #{TH.pprint typeInfo}|]
 
+-- Create a function binding from name, parameter names, types, and return type
 functionBinding :: String -> [String] -> [TH.Type] -> TH.Type -> Binding
 functionBinding name paramNames paramTypes returnType =
   Function name (zip paramNames paramTypeBindings) returnTypeBinding where
@@ -159,9 +165,11 @@ genTypeBinding (App a b) =
   [i|#{genTypeBinding typeCtor}[#{intercalate ", " (map genTypeBinding typeArgs)}]|]
   where (typeCtor, typeArgs) = unfoldApp (App a b)
 
+-- Indent each line of a string by four spaces
 indent :: String -> String
 indent snippet = intercalate "\n" $ map ("    " ++) $ lines snippet
 
+-- Generate Python function definition code from a Function binding
 genFunction :: Binding -> Maybe String
 genFunction (Function name paramBindingss returnTypeBinding) =
   Just $ intercalate "\n" [setSignature, funcDecl, indent funcBody] where
@@ -174,10 +182,12 @@ genFunction (Function name paramBindingss returnTypeBinding) =
   params = map (second genTypeBinding) paramBindingss
 genFunction _ = Nothing
 
+-- Generate Python type alias code from a TypeAlias binding
 genTypeAlias :: Binding -> Maybe String
 genTypeAlias (TypeAlias typeName typeDef) = Just [i|#{typeName} = #{genTypeBinding typeDef}|]
 genTypeAlias _ = Nothing
 
+-- Generate Python tagged union class code from a TaggedUnion binding
 genTaggedUnion :: Binding -> Maybe String
 genTaggedUnion (TaggedUnion name arity ctors) = Just classDecl where
   classDecl = [i|class #{name}#{typeArgs}(TaggedUnion):|] ++ "\n" ++ indent classBody

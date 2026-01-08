@@ -4,21 +4,27 @@ from . import bindings
 from .env import Env
 from .term import *
 
+# Singleton stub representing the self-referential type in datatype definitions
 class SelfSingleton(Term):
     def binding(self) -> bindings.Term:
         raise Exception("Invalid occurrence of `Self` stub")
 
+# Global instance of SelfSingleton used in constructor type annotations
 Self = SelfSingleton()
 
+# Metaclass enabling datatype classes to behave as both types and term constructors
 class DataTypeMeta(type, DataType):
+    # Enables calling the datatype as a term application
     def __call__(cls, *args: Term) -> Term:
         return Term.__call__(cls, *args)
 
+    # Sets the datatype name from the class name
     def __new__(mcls, name: str, *args: Any):
         cls = super().__new__(mcls, name, *args)
         cls.name = name
         return cls
 
+# Recursively replaces Self stub with the actual datatype in a parameter
 def remove_stub_from_param(param: Param, self: DataType) -> Param:
     match param:
         case Term():
@@ -26,6 +32,7 @@ def remove_stub_from_param(param: Param, self: DataType) -> Param:
         case (var, term):
             return (var, remove_stub(term, self))
 
+# Recursively replaces Self stub with the actual datatype in a term
 def remove_stub(term: Term, self: DataType) -> Term:
     match term:
         case Ann(body, hint):
@@ -51,6 +58,7 @@ def remove_stub(term: Term, self: DataType) -> Term:
             assert isinstance(term, SelfSingleton)
             return self
 
+# Decorator for defining inductive datatypes with automatic constructor generation
 def datatype(env: Env, signature: Type=Set):
     def decorator[T: DataTypeMeta](cls: T) -> T:
         cls.signature = signature
@@ -70,11 +78,13 @@ def datatype(env: Env, signature: Type=Set):
 
     return decorator
 
+# Creates a lambda term from a Python function by inspecting its parameter names
 def lam(func: Callable[..., Term]) -> Term:
     params = inspect.signature(func).parameters
     param_vars: list[Var] = [Var(name) for name in params.keys()]
     return Lam(param_vars, func(*param_vars))
 
+# Decorator for declaring typed terms by extracting signature from annotations
 def decl(env: Env):
     def decorator(func: Callable[..., Term]) -> Global:
         signature_ = inspect.signature(func)

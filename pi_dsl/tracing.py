@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 from . import bindings
 
+# Represents a single trace entry with function name, arguments, events, and result
 @dataclass
 class Trace:
     func: str
@@ -12,6 +13,7 @@ class Trace:
     result: Optional[str]
 
 
+# Truncates a string for display, cutting at newlines or 35 chars
 def truncate(string: str) -> str:
     truncated = False
     if "\n" in string:
@@ -27,6 +29,7 @@ def truncate(string: str) -> str:
 
     return string
 
+# Tree structure for organizing traces hierarchically with children and size tracking
 @dataclass
 class TraceTree:
     trace: Trace
@@ -42,6 +45,7 @@ class TraceTree:
             string += f" [{len(children)} children, {self.size} total nodes]"
         return string
 
+    # Returns the stack trace as a list of TraceTree nodes from root to deepest pending call
     def stack_trace(self, only_pending: bool=True) -> list[TraceTree]:
         traces: list[TraceTree] = []
         curr = self
@@ -56,6 +60,7 @@ class TraceTree:
 
     __repr__ = __str__
 
+# Converts a flat list of Haskell trace bindings into a list of TraceTree roots
 def from_bindings(traces: list[bindings.Trace]) -> list[TraceTree]:
     stack: list[TraceTree] = []
     trees: list[TraceTree] = []
@@ -74,10 +79,10 @@ def from_bindings(traces: list[bindings.Trace]) -> list[TraceTree]:
                 stack.pop()
                 continue
 
-        
+
         func, args = trace.get_invoc()
         tree = TraceTree(Trace(str(func), [str(arg) for arg in args.get()], [], None), [], 1)
-        
+
         if stack:
             stack[-1].children.append(tree)
             # TODO: replace with post order traversal

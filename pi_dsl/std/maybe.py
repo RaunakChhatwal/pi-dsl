@@ -2,12 +2,16 @@ from .env import env
 from ..term import Ctor, Pi, Rec, Term, Set, Var
 from ..sugar import datatype, decl, DataTypeMeta, lam, Self
 
+# Optional value type: Nothing or Just wrapping a value of type T
 T, U = Var("T"), Var("U")
 @datatype(env, signature=Pi([(T, Set)], Set))
 class Maybe(metaclass=DataTypeMeta):
+    # Constructor for absent value
     nothing: Ctor[(T, Set) >> Self(T)]
+    # Constructor wrapping a value of type T
     just: Ctor[(T, Set) >> (T >> Self(T))]
 
+# Eliminator for Maybe: applies default on Nothing, f on Just
 @decl(env)
 def maybe(T: Var[Set], U: Var[Set], default: Var[U], f: Var[T >> U], m: Var[Maybe(T)]) -> Term[U]:
     motive = lam(lambda T, _: (T >> U) >> U)
