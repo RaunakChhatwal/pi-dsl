@@ -2,7 +2,7 @@
   "name": "pi-dsl",
   "image": "debian:trixie",
   "remoteUser": "dev",
-  "postCreateCommand": "export PATH=\"$HOME/.nix-profile/bin:$PATH\"",
+  "postCreateCommand": "sh /workspaces/pi-dsl/.devcontainer/init.sh",
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
       "username": "dev",
@@ -11,9 +11,8 @@
     "ghcr.io/devcontainers/features/python:1": {
       "version": "3.12"
     },
-    "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/nix:1": {
-      "packages": "direnv, neovim, fd, ripgrep, file",
+      "packages": "direnv, neovim, git, fd, ripgrep, file",
       "extraNixConfig": "experimental-features = nix-command flakes"
     }
   }
