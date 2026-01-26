@@ -1,0 +1,15 @@
+image: gitpod/workspace-full
+
+env:
+  NIX_CONFIG: "experimental-features = nix-command flakes"
+
+tasks:
+  - name: nix develop
+    init: nix develop -c bash -lc "cabal update && cabal build pi-dsl-shared-lib"
+    command: nix develop
+
+vscode:
+  extensions:
+    - haskell.haskell
+    - ms-python.python
+    - ms-python.vscode-pylance
