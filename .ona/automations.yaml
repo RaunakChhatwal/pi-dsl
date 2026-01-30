@@ -1,0 +1,9 @@
+tasks:
+  install-direnv-extension:
+    name: install-direnv-extension
+    triggeredBy:
+      - postEnvironmentStart
+    command: |
+      set -euo pipefail
+      command -v code >/dev/null 2>&1
+      code --list-extensions | grep -qx 'mkhl.direnv' || code --install-extension mkhl.direnv
