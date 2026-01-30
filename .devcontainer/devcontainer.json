@@ -15,5 +15,20 @@
       "packages": "direnv, neovim, git, fd, ripgrep, file",
       "extraNixConfig": "experimental-features = nix-command flakes"
     }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "haskell.haskell",
+        "ms-python.python",
+        "mkhl.direnv",
+        "bbenoist.nix"
+      ],
+      "settings": {
+        "editor.rulers": [100],
+        "workbench.editor.enablePreview": false,
+        "files.autoSave": "off"
+      }
+    }
   }
 }
