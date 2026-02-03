@@ -2,7 +2,6 @@
   "name": "pi-dsl",
   "image": "debian:trixie",
   "remoteUser": "dev",
-  "postCreateCommand": "sh /workspaces/pi-dsl/.devcontainer/init.sh",
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
       "username": "dev",
@@ -12,22 +11,26 @@
     //   "version": "3.12"
     // },
     "ghcr.io/devcontainers/features/nix:1": {
-      "packages": "nixpkgs.python3, nixpkgs.hello, nixpkgs.direnv, nixpkgs.neovim, nixpkgs.git, nixpkgs.fd, nixpkgs.ripgrep, nixpkgs.file",
-      "extraNixConfig": "experimental-features = nix-command flakes",
-      "useAttributePath": true
-    }
+      "packages": "direnv, neovim, git, fd, ripgrep, file",
+      "extraNixConfig": "experimental-features = nix-command flakes"
+    },
+    "./features/misc": {}
   },
+  "postCreateCommand": "sh /workspaces/pi-dsl/.devcontainer/init.sh",
   "customizations": {
     "vscode": {
-      // "extensions": [
-      //   "haskell.haskell",
-      //   "ms-python.python",
-      //   "mkhl.direnv"
-      // ],
+      "extensions": [
+        "haskell.haskell",
+        // "ms-python.python",
+        "mkhl.direnv",
+        "bbenoist.nix"
+      ],
       "settings": {
         "editor.rulers": [100],
         "workbench.editor.enablePreview": false,
-        "files.autoSave": "off"
+        "files.autoSave": "off",
+        "direnv.path.executable": "/home/dev/.nix-profile/bin/direnv",
+        "editor.fontSize": 12
       }
     }
   }
