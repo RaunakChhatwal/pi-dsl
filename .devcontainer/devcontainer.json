@@ -8,13 +8,14 @@
       "username": "dev",
       "userUid": "1000"
     },
-    "ghcr.io/devcontainers/features/python:1": {
-      "version": "3.12"
-    },
+    // "ghcr.io/devcontainers/features/python:1": {
+    //   "version": "3.12"
+    // },
     "ghcr.io/devcontainers/features/nix:1": {
       "packages": "direnv, neovim, git, fd, ripgrep, file",
       "extraNixConfig": "experimental-features = nix-command flakes"
-    }
+    },
+    "./features/misc": {}
   },
   "customizations": {
     "vscode": {
@@ -27,7 +28,9 @@
       "settings": {
         "editor.rulers": [100],
         "workbench.editor.enablePreview": false,
-        "files.autoSave": "off"
+        "files.autoSave": "off",
+        "direnv.path.executable": "/home/dev/.nix-profile/bin/direnv",
+        "editor.fontSize": 12
       }
     }
   }

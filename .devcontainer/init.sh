@@ -1,9 +1,9 @@
+direnv=/home/dev/.nix-profile/bin/direnv
 echo 'export PATH="$HOME/.nix-profile/bin:$PATH"' >> ~/.bashrc
-echo 'eval "$(/home/dev/.nix-profile/bin/direnv hook bash)"' >> ~/.bashrc
+echo 'eval "$($direnv hook bash)"' >> ~/.bashrc
 echo 'export PS1="\u \W> "' >> ~/.bashrc
 source ~/.bashrc
 cd /workspaces/pi-dsl
 echo 'use flake' >> .envrc
-/home/dev/.nix-profile/bin/direnv allow
-curl -fsSL https://opencode.ai/install | bash
-/home/dev/.nix-profile/bin/direnv exec . cabal update
+$direnv allow
+$direnv exec . cabal update

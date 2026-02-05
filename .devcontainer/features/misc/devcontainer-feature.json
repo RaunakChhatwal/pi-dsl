@@ -1,0 +1,8 @@
+{
+  "id": "misc",
+  "version": "1.0.0",
+  "name": "misc",
+  "installsAfter": [
+    "ghcr.io/devcontainers/features/nix"
+  ]
+}
