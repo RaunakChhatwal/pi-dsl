@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import functools
+from typing import overload
 from .base import init_tuple, Int, List, String, Tuple
 from . import bindings
-from .bindings import bind, Entry, ppr_term, TermName
+from .bindings import bind, BinderInfo, Entry, ppr_term, TermName
 
 # Wrapper class for annotating terms with type hints used by the DSL
 @dataclass
@@ -16,7 +17,7 @@ class Hint:
 class Term():
     # Convert this term to a Haskell binding representation
     def binding(self) -> bindings.Term:
-        raise NotImplemented
+        raise NotImplementedError
 
     # Pretty-print this term using Haskell's pretty printer
     def __str__(self) -> str:
@@ -87,16 +88,44 @@ class Var(Term):
 # Hole variable representing an unnamed/inferred position
 hole = Var("_")
 
-# Param is either a type (for non-dependent arrows) or a (name, type) pair
-type Param = Type | tuple[Var, Type]
+@dataclass
+class IParam:
+    var: Var
+    param_type: Type
 
-# Extract the (Var, Type) pair from a Param, using hole for unnamed params
-def raw_param(param: Param) -> tuple[Var, Type]:
+    @overload
+    def __init__(self, param_name_or_type: Type) -> None: ...
+
+    @overload
+    def __init__(self, param_name_or_type: Var, param_type: Type) -> None: ...
+
+    def __init__(self, param_name_or_type: Var | Type, param_type: Type | None = None) -> None:
+        if param_type is None:
+            self.var = hole
+            self.param_type = param_name_or_type
+        else:
+            assert isinstance(param_name_or_type, Var)
+            self.var = param_name_or_type
+            self.param_type = param_type
+
+# Param is either a type (for non-dependent arrows) or a (name, type) pair
+type Param = Type | tuple[Var, Type] | IParam
+
+# Extract the (Var, Type, implicit) triple from a Param, using hole for unnamed params
+def raw_param(param: Param) -> tuple[Var, Type, bool]:
     match param:
         case Term() as param_type:
-            return (hole, param_type)
+            return (hole, param_type, False)
+        case IParam(var, param_type):
+            return (var, param_type, True)
         case (var, param_type):
-            return (var, param_type)
+            return (var, param_type, False)
+
+# Marks a parameter binding as implicit (for implicit-arg insertion)
+class IVar(Var):
+    pass
+    # def __class_getitem__(cls, hint: Type) -> Hint:
+    #     return Hint(Var, hint, implicit=True)
 
 # Constructor: a named constructor for an inductive datatype
 @dataclass
@@ -152,7 +181,11 @@ class Lam(Term):
 
         binding = self.body.binding()
         for param_name in reversed(param_names):
-            binding = bindings.Term.init_lam(bind(param_name.name_binding(), binding))
+            if isinstance(param_name, IVar):
+                binder_info = BinderInfo(BinderInfo.KIND_IMPLICIT)
+            else:
+                binder_info = BinderInfo(BinderInfo.KIND_EXPLICIT)
+            binding = bindings.Term.init_lam(binder_info, bind(param_name.name_binding(), binding))
         return binding
 
 # Pi type (dependent function type) with one or more parameters
@@ -170,8 +203,11 @@ class Pi(Term):
                 params = [param]
 
         binding = self.return_type.binding()
-        for (var, param_type) in map(raw_param, reversed(params)):
-            binding = bindings.Term.init_pi(param_type.binding(), bind(var.name_binding(), binding))
+        for (var, param_type, implicit) in map(raw_param, reversed(params)):
+            binder_info = \
+                BinderInfo(BinderInfo.KIND_IMPLICIT if implicit else BinderInfo.KIND_EXPLICIT)
+            binding = bindings.Term.init_pi(
+                binder_info, param_type.binding(), bind(var.name_binding(), binding))
         return binding
 
 # Recursor: the elimination principle for an inductive datatype

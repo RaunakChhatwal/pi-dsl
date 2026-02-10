@@ -233,4 +233,5 @@ generateBindings bindings = intercalate "\n\n" (imports : classes ++ aliases ++ 
   imports = intercalate "\n"
     ["from __future__ import annotations",
      "from typing import Literal",
-     "from .base import *"]
+     "from .base import \\",
+     "  call_export, init_tuple, Int, List, set_export_signature, String, TaggedUnion, Tuple"]

@@ -4,8 +4,9 @@ import Control.Monad.Except (MonadError(..), Except, runExcept)
 import Control.Monad.Reader (MonadReader(local), asks, ReaderT(runReaderT))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT)
+import Control.Monad.State.Class qualified as State
 import PrettyPrint (D(..), Disp(..), Doc, ppr)
-import Syntax (CtorName, DataTypeName, Term(..), TermName, Type, Var(Global, Local))
+import Syntax (CtorName, DataTypeName, Term(..), TermName, Type, Var(Global, Local, Meta))
 import Text.PrettyPrint.HughesPJ (($$), sep)
 import qualified Unbound.Generics.LocallyNameless as Unbound
 import Data.Bifunctor (second)
@@ -27,7 +28,7 @@ traceM funcName args toStr monad = do
   return result
 
 -- The main type checking monad with tracing, fresh names, environment, and errors
-type TcMonad = Stream (Of Trace) (Unbound.FreshMT (ReaderT Env (Except Err)))
+type TcMonad = Stream (Of Trace) (Unbound.FreshMT (StateT TcState (ReaderT Env (Except Err))))
 
 -- Fresh instance for Stream to generate fresh names
 instance Unbound.Fresh m => Unbound.Fresh (Stream (Of Trace) m) where
@@ -47,13 +48,27 @@ instance TC m => TC (MaybeT m) where
 
 -- Run the type checking monad and collect traces
 traceTcMonad :: TcMonad a -> (Either String a, [Trace])
-traceTcMonad stream = go stream 0 where
-  go stream depth =
-    case runExcept $ runReaderT (runStateT (Unbound.unFreshMT $ S.next stream) depth) emptyEnv of
+traceTcMonad stream = go stream 0 emptyTcState where
+  go stream freshState tcState =
+    case runExcept $
+        runReaderT
+          (runStateT
+            (runStateT
+              (Unbound.unFreshMT $ S.next stream) freshState) tcState) emptyEnv of
       Left error -> (Left $ ppr error, [])
-      Right (Left result, _) -> (Right result, [])
-      Right (Right (trace, restStream), newDepth) -> second (trace :) (go restStream newDepth)
+      Right ((Left result, _), _) -> (Right result, [])
+      Right ((Right (trace, restStream), newFreshState), newTcState) ->
+        second (trace :) (go restStream newFreshState newTcState)
   emptyEnv = Env Map.empty Map.empty Map.empty Nothing
+
+data TcState = TcState {
+  mvarCounter :: Int,
+  mvarTypes :: Map Int Type,
+  mvarSolutions :: Map Int Term
+}
+
+emptyTcState :: TcState
+emptyTcState = TcState 0 Map.empty Map.empty
 
 -- Type checking environment with data types, declarations, and local bindings
 data Env = Env {
@@ -63,6 +78,31 @@ data Env = Env {
   dataTypeBeingDeclared :: Maybe (DataTypeName, Type)
 }
 
+newMVar :: Type -> TcMonad Term
+newMVar type' = do
+  tcState <- State.get
+  let id = mvarCounter tcState
+  State.put $ tcState {
+    mvarCounter = id + 1,
+    mvarTypes = Map.insert id type' (mvarTypes tcState)
+  }
+  return $ Var (Meta id)
+
+lookUpMVarType :: Int -> TcMonad Type
+lookUpMVarType id = do
+  tcState <- State.get
+  case Map.lookup id (mvarTypes tcState) of
+    Just type' -> return type'
+    Nothing -> err [DS "Meta", DD id, DS "not found"]
+
+lookUpMVarSolution :: Int -> TcMonad (Maybe Term)
+lookUpMVarSolution id = Map.lookup id . mvarSolutions <$> State.get
+
+assignMVar :: Int -> Term -> TcMonad ()
+assignMVar id term = do
+  tcState <- State.get
+  State.put $ tcState { mvarSolutions = Map.insert id term (mvarSolutions tcState) }
+
 -- Look up a global declaration by name
 lookUpDecl :: TC m => String -> m (Maybe (Type, Term))
 lookUpDecl var = asks (Map.lookup var . decls)
@@ -71,10 +111,11 @@ lookUpDecl var = asks (Map.lookup var . decls)
 lookUpType :: Var -> TcMonad Type
 lookUpType (Local name) = asks (Map.lookup name . locals) >>= \case
   Just type' -> return type'
-  Nothing -> err [DS"Local variable", DD name, DS "not found"]
+  Nothing -> err [DS "Local variable", DD name, DS "not found"]
 lookUpType (Global name) = asks (Map.lookup name . decls) >>= \case
   Just (type', _) -> return type'
-  Nothing -> err [DS"Global variable", DD name, DS "not found"]
+  Nothing -> err [DS "Global variable", DD name, DS "not found"]
+lookUpType (Meta id) = lookUpMVarType id
 
 -- Add a local variable binding to the environment
 addLocal :: TermName -> Type -> TcMonad a -> TcMonad a

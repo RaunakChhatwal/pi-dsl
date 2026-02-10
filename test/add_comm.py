@@ -7,29 +7,24 @@ from pi_dsl.term import Rec, Term, Var
 # Proof that n + 0 = n by induction on n
 n = Var("n")
 @decl(env)
-def add_zero(n: Var[Nat]) -> Term[Eq(Nat, n + Nat.zero, n)]:
-    motive = lam(lambda n: Eq(Nat, n + Nat.zero, n))
-    base_case = Eq.refl(Nat, Nat.zero)
-    inductive_case = lam(lambda pred, h: cong(Nat, Nat, Nat.succ, pred + Nat.zero, pred, h))
+def add_zero(n: Var[Nat]) -> Term[Eq(n + Nat.zero, n)]:
+    motive = lam(lambda n: Eq(n + Nat.zero, n))
+    base_case = Eq.refl(Nat.zero)
+    inductive_case = lam(lambda pred, h: cong(Nat.succ, h))
     return Rec(Nat)(motive, base_case, inductive_case, n)
 
 # Proof that n + succ(m) = succ(n + m) by induction on n
 m = Var("m")
 @decl(env)
-def add_succ(n: Var[Nat], m: Var[Nat]) -> Term[Eq(Nat, n + Nat.succ(m), Nat.succ(n + m))]:
-    motive = lam(lambda n: Eq(Nat, n + Nat.succ(m), Nat.succ(n + m)))
-    base_case = Eq.refl(Nat, Nat.succ(m))
-    inductive_case = lam(lambda pred, h:
-        cong(Nat, Nat, Nat.succ, pred + Nat.succ(m), Nat.succ(pred + m), h))
+def add_succ(n: Var[Nat], m: Var[Nat]) -> Term[Eq(n + Nat.succ(m), Nat.succ(n + m))]:
+    motive = lam(lambda n: Eq(n + Nat.succ(m), Nat.succ(n + m)))
+    base_case = Eq.refl(Nat.succ(m))
+    inductive_case = lam(lambda pred, h: cong(Nat.succ, h))
     return Rec(Nat)(motive, base_case, inductive_case, n)
 
 # Proof of commutativity: n + m = m + n by induction on m
 @decl(env)
-def add_comm(n: Var[Nat], m: Var[Nat]) -> Term[Eq(Nat, n + m, m + n)]:
-    motive = lam(lambda m: Eq(Nat, n + m, m + n))
-    base_case = add_zero(n)
-    inductive_case = lam(lambda m, h:
-        trans(Nat, n + Nat.succ(m), Nat.succ(n + m), Nat.succ(m + n), # redundant args
-            add_succ(n, m), # n + m.succ = succ (n + m)
-            cong(Nat, Nat, Nat.succ, n + m, m + n, h))) # succ (n + m) = succ (m + n)
-    return Rec(Nat)(motive, base_case, inductive_case, m)
+def add_comm(n: Var[Nat], m: Var[Nat]) -> Term[Eq(n + m, m + n)]:
+    motive = lam(lambda m: Eq(n + m, m + n))
+    inductive_case = lam(lambda m, h: trans(add_succ(n, m), cong(Nat.succ, h)))
+    return Rec(Nat)(motive, add_zero(n), inductive_case, m)

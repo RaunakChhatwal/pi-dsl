@@ -7,9 +7,9 @@ import Unbound.Generics.LocallyNameless qualified as Unbound
 import Unbound.Generics.LocallyNameless.Internal.Fold qualified as Unbound
 import Environment (TcMonad, traceM)
 import Environment qualified as Env
-import Equal (equate, whnf)
+import Equal (unify, whnf)
 import PrettyPrint (D(DS, DD), ppr)
-import Syntax (Entry(Data, Decl), Level(Succ), Term(..), TermName, Type, maxLevel)
+import Syntax (BinderInfo(..), Entry(Data, Decl), Level(Succ), Term(..), TermName, Type, maxLevel)
 import Inductive (checkDataTypeDecl, synthesizeRecursorType)
 
 -- Check that a term is a type and return its universe level
@@ -25,7 +25,7 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
 
   Sort level -> return $ Sort $ Succ level
 
-  Pi paramType bind -> do
+  Pi _ paramType bind -> do
     (paramName, returnType) <- Unbound.unbind bind
     paramSortLevel <- ensureType paramType
     returnSortLevel <- Env.addLocal paramName paramType $ ensureType returnType
@@ -33,11 +33,15 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
 
   App func arg -> do
     funcType <- inferType func
-    whnf funcType >>= \case
-      Pi paramType bind -> do
-        checkType arg paramType
-        return $ Unbound.instantiate bind [arg]
-      _ -> Env.err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
+    go func funcType arg where
+      go func funcType arg = whnf funcType >>= \case
+        Pi Implicit paramType binder -> do
+          mvar <- Env.newMVar paramType
+          go (App func mvar) (Unbound.instantiate binder [mvar]) arg
+        Pi Explicit paramType binder -> do
+          checkType arg paramType
+          return $ Unbound.instantiate binder [arg]
+        _ -> Env.err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
 
   Ann term type' -> do
     _ <- ensureType type'
@@ -56,15 +60,20 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
 checkType :: Term -> Type -> TcMonad ()
 checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
   case term of
-    Lam bodyBind -> whnf type' >>= \case
-      Pi paramType typeBind -> do
-        -- unbind the variables in the lambda expression and pi type
-        (var, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBind typeBind
-        -- check the type of the body of the lambda expression
-        Env.addLocal var paramType $ checkType body returnType
+    Lam lamBinderInfo bodyBinder -> whnf type' >>= \case
+      Pi piBinderInfo paramType typeBinder -> case (lamBinderInfo, piBinderInfo) of
+        (Explicit, Implicit) -> do
+          mvar <- Env.newMVar paramType
+          checkType term $ Unbound.instantiate typeBinder [mvar]
+        _ | lamBinderInfo == piBinderInfo -> do
+          (var, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder typeBinder
+          Env.addLocal var paramType $ checkType body returnType
+        _ -> Env.err [DS "Expected explicit parameter but received implicit lambda"]
       _ -> Env.err [DS "Lambda expression should have a function type, not", DD type']
 
-    _ -> flip equate type' =<< inferType term
+    _ -> do
+      inferred <- inferType term
+      unify inferred type'
 
 -- Verify that a term has no free variables
 checkClosed :: Term -> TcMonad ()

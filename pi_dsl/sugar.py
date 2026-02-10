@@ -2,7 +2,8 @@ import inspect
 from typing import Any, Callable
 from . import bindings
 from .env import Env
-from .term import *
+from .term import Ann, App, Ctor, DataType, Global, Hint, IParam, IVar, Lam, Param, Pi, Rec, Set, \
+    Sort, Term, Type, Var
 
 # Singleton stub representing the self-referential type in datatype definitions
 class SelfSingleton(Term):
@@ -24,9 +25,13 @@ class DataTypeMeta(type, DataType):
         cls.name = name
         return cls
 
+I = IParam
+
 # Recursively replaces Self stub with the actual datatype in a parameter
 def remove_stub_from_param(param: Param, self: DataType) -> Param:
     match param:
+        case I(var, term):
+            return I(var, remove_stub(term, self))
         case Term():
             return remove_stub(param, self)
         case (var, term):
@@ -80,17 +85,26 @@ def datatype(env: Env, signature: Type=Set):
 
 # Creates a lambda term from a Python function by inspecting its parameter names
 def lam(func: Callable[..., Term]) -> Term:
-    params = inspect.signature(func).parameters
-    param_vars: list[Var] = [Var(name) for name in params.keys()]
+    # params = inspect.signature(func).parameters
+    param_vars: list[Var] = [] # [Var(name) for name in params.keys()]
+    for name, param in inspect.signature(func).parameters.items():
+        if isinstance(param.annotation, Hint) and param.annotation.cls is IVar:
+            param_vars.append(IVar(name))
+        else:
+            param_vars.append(Var(name))
     return Lam(param_vars, func(*param_vars))
 
 # Decorator for declaring typed terms by extracting signature from annotations
 def decl(env: Env):
     def decorator(func: Callable[..., Term]) -> Global:
-        signature_ = inspect.signature(func)
-        params: list[Param] = \
-            [(Var(name), param.annotation.hint) for name, param in signature_.parameters.items()]
-        signature = Pi(params, signature_.return_annotation.hint)
+        func_signature = inspect.signature(func)
+        params: list[Param] = []
+        for name, param in func_signature.parameters.items():
+            if param.annotation.cls is IVar:
+                params.append(I(Var(name), param.annotation.hint))
+            else:
+                params.append((Var(name), param.annotation.hint))
+        signature = Pi(params, func_signature.return_annotation.hint)
 
         var = Global(func.__name__)
         env.declare(var, signature, lam(func))

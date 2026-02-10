@@ -113,7 +113,8 @@ class List[T](Structure, Managed):
     def __init__(self, *items: T):
         self.length = len(items)
         array_type = self.type_args[0] * len(items)
-        self.data = ctypes.cast(array_type(*items), c_void_p)
+        self._array = array_type(*items)
+        self.data = ctypes.cast(self._array, c_void_p)
 
         Managed.__init__(self)
         for item in items:

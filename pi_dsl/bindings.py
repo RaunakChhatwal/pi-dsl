@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Literal
-from .base import *
+from .base import \
+  call_export, init_tuple, Int, List, set_export_signature, String, TaggedUnion, Tuple
 
 class Either[T1, T2](TaggedUnion):
     kind: Literal[0, 1]
@@ -106,10 +107,11 @@ class Name[T1](TaggedUnion):
         return self.get_field(Tuple[Int, Int]).get()
 
 class Var(TaggedUnion):
-    kind: Literal[0, 1]
+    kind: Literal[0, 1, 2]
     
     KIND_LOCAL = 0
     KIND_GLOBAL = 1
+    KIND_META = 2
     
     @classmethod
     def init_local(cls, value: TermName):
@@ -126,6 +128,20 @@ class Var(TaggedUnion):
     def get_global(self) -> String:
         assert self.kind == self.KIND_GLOBAL
         return self.get_field(String)
+    
+    @classmethod
+    def init_meta(cls, value: Int):
+        return cls(cls.KIND_META, value)
+    
+    def get_meta(self) -> Int:
+        assert self.kind == self.KIND_META
+        return self.get_field(Int)
+
+class BinderInfo(TaggedUnion):
+    kind: Literal[0, 1]
+    
+    KIND_EXPLICIT = 0
+    KIND_IMPLICIT = 1
 
 class Bind[T1, T2](TaggedUnion):
     kind: Literal[0]
@@ -170,12 +186,12 @@ class Term(TaggedUnion):
         return self.get_field(Var)
     
     @classmethod
-    def init_lam(cls, value: Bind[TermName, Term]):
-        return cls(cls.KIND_LAM, value)
+    def init_lam(cls, *values: *tuple[BinderInfo, Bind[TermName, Term]]):
+        return cls(cls.KIND_LAM, init_tuple(*values))
     
-    def get_lam(self) -> Bind[TermName, Term]:
+    def get_lam(self) -> tuple[BinderInfo, Bind[TermName, Term]]:
         assert self.kind == self.KIND_LAM
-        return self.get_field(Bind[TermName, Term])
+        return self.get_field(Tuple[BinderInfo, Bind[TermName, Term]]).get()
     
     @classmethod
     def init_app(cls, *values: *tuple[Term, Term]):
@@ -186,12 +202,12 @@ class Term(TaggedUnion):
         return self.get_field(Tuple[Term, Term]).get()
     
     @classmethod
-    def init_pi(cls, *values: *tuple[Type, Bind[TermName, Type]]):
+    def init_pi(cls, *values: *tuple[BinderInfo, Type, Bind[TermName, Type]]):
         return cls(cls.KIND_PI, init_tuple(*values))
     
-    def get_pi(self) -> tuple[Type, Bind[TermName, Type]]:
+    def get_pi(self) -> tuple[BinderInfo, Type, Bind[TermName, Type]]:
         assert self.kind == self.KIND_PI
-        return self.get_field(Tuple[Type, Bind[TermName, Type]]).get()
+        return self.get_field(Tuple[BinderInfo, Type, Bind[TermName, Type]]).get()
     
     @classmethod
     def init_ann(cls, *values: *tuple[Term, Type]):

@@ -1,9 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from .base import *
+from .base import List, String
 from . import bindings, tracing
-from .bindings import Either, Entry, Maybe, unbind
-from .term import Ann, App, DataType, Global, Lam, Pi, Rec, Sort, Term, Type, Var
+from .bindings import BinderInfo, Either, Entry, Maybe, unbind
+from .term import Ann, App, DataType, Global, IParam, IVar, Lam, Pi, Rec, Sort, Term, Type, Var
 
 # Represents a top-level declaration with a name, type signature, and definition body
 @dataclass
@@ -23,7 +23,7 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
         case bindings.Term.KIND_SORT:
             level = 0
             level_binding = binding.get_sort()
-            while level_binding.kind == 1:
+            while level_binding.kind == bindings.Level.KIND_SUCC:
                 level += 1
                 level_binding = level_binding.get_succ()
             return Sort(level)
@@ -35,19 +35,28 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
                     return Var.from_binding(var_binding.get_local())
                 case bindings.Var.KIND_GLOBAL:
                     return Global(str(var_binding.get_global()))
+                case bindings.Var.KIND_META:
+                    raise NotImplementedError
 
         case bindings.Term.KIND_LAM:
-            var, body = unbind(binding.get_lam()).get()
-            return Lam(Var.from_binding(var), binding_to_term(body, env))
+            binder_info, binder = binding.get_lam()
+            param_name, body = unbind(binder).get()
+            var = Var.from_binding(param_name)
+            if binder_info.kind == BinderInfo.KIND_IMPLICIT:
+                var = IVar(var.name, var.id)
+            return Lam(var, binding_to_term(body, env))
 
         case bindings.Term.KIND_APP:
             func, arg = binding.get_app()
             return App(binding_to_term(func, env), binding_to_term(arg, env))
 
         case bindings.Term.KIND_PI:
-            param_type, bind = binding.get_pi()
+            binder_info, param_type_binding, bind = binding.get_pi()
             param_name, return_type = unbind(bind).get()
-            param = (Var.from_binding(param_name), binding_to_term(param_type, env))
+            implicit = binder_info.kind == bindings.BinderInfo.KIND_IMPLICIT
+            var = Var.from_binding(param_name)
+            param_type = binding_to_term(param_type_binding, env)
+            param = IParam(var, param_type) if implicit else (var, param_type)
             return Pi(param, binding_to_term(return_type, env))
 
         case bindings.Term.KIND_ANN:

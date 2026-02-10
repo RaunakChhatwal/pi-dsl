@@ -132,6 +132,7 @@ instance Display Entry where
 instance Display Var where
   display (Local name) = display name
   display (Global name) = display name
+  display (Meta i) = display @String ("?" ++ show i)
 
 -------------------------------------------------------------------------
 
@@ -242,18 +243,21 @@ instance Display (Unbound.Name Term) where
   display = display . showNameExact
 
 piDocs :: Type -> DispInfo -> [Doc]
-piDocs (Pi paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) -> do
+piDocs (Pi binderInfo paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) -> do
   paramDoc <- if paramName `elem` toListOf Unbound.fv returnType
     then fmap PP.parens $ (<+>) . (<+> PP.colon) <$> display paramName <*> display paramType
     else withPrec (levelArrow + 1) (display paramType)
-  (paramDoc :) <$> piDocs returnType
+  let paramDoc' = case binderInfo of
+        Implicit -> PP.braces paramDoc
+        Explicit -> paramDoc
+  (paramDoc' :) <$> piDocs returnType
 piDocs returnType = pure <$> display returnType
 
 instance Display Term where
   display (Sort Zero) = return $ PP.text "Set"
   display (Sort level) = return $ PP.text ("Sort" ++ show level)
   display (Var var) = display var
-  display a@(Lam _) = do
+  display a@(Lam _ _) = do
     n <- ask prec
     (binds, body) <- withPrec levelLam $ gatherBinders a
     return $ parens (levelLam < n) $ PP.hang (PP.text "\\" PP.<> PP.hsep binds PP.<> PP.text ".") 2 body
@@ -263,7 +267,7 @@ instance Display Term where
     df <- withPrec levelApp (display func)
     dargs <- mapM (withPrec (levelApp+1) . display) args
     return $ parens (levelApp < n) $ PP.hang df 2 (PP.sep dargs)
-  display piType@(Pi _ _) = do
+  display piType@(Pi {}) = do
     precision <- ask prec
     let arrow = PP.space <> PP.text "->"
     parens (levelArrow < precision) . PP.sep . PP.punctuate arrow <$> piDocs piType
@@ -279,7 +283,7 @@ instance Display Term where
   display (Rec typeName) = display @String [i|#{typeName}.rec|]
 
 gatherBinders :: Term -> DispInfo -> ([Doc], Doc)
-gatherBinders (Lam b) =
+gatherBinders (Lam _ b) =
   Unbound.lunbind b $ \(n, body) -> do
     dn <- display n
     (rest, body') <- gatherBinders body
