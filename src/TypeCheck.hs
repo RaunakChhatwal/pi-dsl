@@ -1,9 +1,10 @@
 module TypeCheck where
 
-import Control.Monad (join, when)
+import Control.Monad (join, when, unless)
 import Control.Monad.Trans (lift)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Unbound.Generics.LocallyNameless.Bind qualified as Unbound
+import Unbound.Generics.LocallyNameless.Internal.Fold (toListOf)
 import Environment (TcMonad, traceM)
 import Environment qualified as Env
 import Equal (unify, whnf)
@@ -23,7 +24,7 @@ elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
           mvar <- Env.newMVar paramType
           go (App func mvar) (Unbound.instantiate binder [mvar])
         Pi Explicit paramType _ -> App func <$> elaborateAgainst arg paramType
-        _ -> App func <$> elaborate arg
+        _ -> Env.err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
 
   Pi binderInfo paramType binder -> do
     elaboratedParamType <- elaborate paramType
@@ -31,9 +32,9 @@ elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
     elaboratedReturnType <- Env.addLocal paramName elaboratedParamType $ elaborate returnType
     return $ Pi binderInfo elaboratedParamType $ Unbound.bind paramName elaboratedReturnType
 
-  Ann term' type' -> do
+  Ann inner type' -> do
     elaboratedType <- elaborate type'
-    elaboratedTerm <- elaborateAgainst term' elaboratedType
+    elaboratedTerm <- elaborateAgainst inner elaboratedType
     return $ Ann elaboratedTerm elaboratedType
 
   Lam _ _ -> Env.err [DS "Unguided lambda elaboration not implemented"]
@@ -43,27 +44,63 @@ elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
 -- Elaborate a term against an expected type
 elaborateAgainst :: Term -> Type -> TcMonad Term
 elaborateAgainst term expectedType = traceM "elaborateAgainst" [ppr term, ppr expectedType] ppr $
-  whnf expectedType >>= \case
-    Pi Implicit paramType returnTypeBinder -> case term of
-      Lam Implicit bodyBinder -> do
-        (var, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder returnTypeBinder
-        elaboratedBody <- Env.addLocal var paramType $ elaborateAgainst body returnType
-        return $ Lam Implicit (Unbound.bind var elaboratedBody)
-      Lam Explicit _ -> do
-        (var, returnType) <- Unbound.unbind returnTypeBinder
-        elaboratedBody <- Env.addLocal var paramType $ elaborateAgainst term returnType
-        return $ Lam Implicit (Unbound.bind var elaboratedBody)
-      _ -> elaborate term
+  case term of
+    Lam lamBinderInfo bodyBinder -> whnf expectedType >>= \case
+      Pi piBinderInfo paramType returnTypeBinder -> case (lamBinderInfo, piBinderInfo) of
+        (Explicit, Implicit) -> do
+          (paramName, returnType) <- Unbound.unbind returnTypeBinder
+          elaboratedBody <- Env.addLocal paramName paramType $ elaborateAgainst term returnType
+          return $ Lam Implicit (Unbound.bind paramName elaboratedBody)
 
-    Pi Explicit paramType typeBinder -> case term of
-      Lam Explicit termBinder -> do
-        (var, body, _, returnType) <- lift $ Unbound.unbind2Plus termBinder typeBinder
-        elaboratedBody <- Env.addLocal var paramType $ elaborateAgainst body returnType
-        return $ Lam Explicit (Unbound.bind var elaboratedBody)
-      Lam Implicit _ -> Env.err [DS "Expected explicit parameter but received implicit lambda"]
-      _ -> elaborate term
+        _ | lamBinderInfo == piBinderInfo -> do
+          (paramName, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder returnTypeBinder
+          elaboratedBody <- Env.addLocal paramName paramType $ elaborateAgainst body returnType
+          return $ Lam lamBinderInfo $ Unbound.bind paramName elaboratedBody
+
+        _ -> Env.err [DS "Expected explicit parameter but received implicit lambda"]
+
+      _ -> Env.err [DS "Lambda expression should have a function type, not", DD expectedType]
 
     _ -> elaborate term
+
+-- Remove implicit applications from an elaborated term
+delaborate :: Term -> TcMonad Term
+delaborate term = traceM "delaborate" [ppr term] ppr $ case term of
+  App func arg -> do
+    funcType <- inferType func
+    whnf funcType >>= \case
+      Pi Implicit _ _ -> delaborate func
+      Pi Explicit paramType _ -> App <$> delaborate func <*> delaborateAgainst arg paramType
+      _ -> Env.err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
+
+  Pi binderInfo paramType binder -> do
+    (paramName, returnType) <- Unbound.unbind binder
+    Pi binderInfo <$> delaborate paramType <*>
+      (Unbound.bind paramName <$> Env.addLocal paramName paramType (delaborate returnType))
+
+  Ann inner type' -> Ann <$> delaborateAgainst inner type' <*> delaborate type'
+
+  Lam _ _ -> Env.err [DS "Unguided lambda delaboration not implemented"]
+
+  _ -> return term
+
+-- Delaborate a term against an expected type
+delaborateAgainst :: Term -> Type -> TcMonad Term
+delaborateAgainst term expectedType = traceM "delaborateAgainst" [ppr term, ppr expectedType] ppr $
+  case term of
+    Lam lamBinderInfo bodyBinder -> whnf expectedType >>= \case
+      Pi piBinderInfo paramType returnTypeBinder -> do
+        unless (lamBinderInfo /= piBinderInfo) $
+          Env.err [DS "Lambda binder does not match expected function binder"]
+        (paramName, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder returnTypeBinder
+        delaboratedBody <- Env.addLocal paramName paramType $ delaborateAgainst body returnType
+        if lamBinderInfo == Implicit && paramName `notElem` toListOf Unbound.fv delaboratedBody
+          then return delaboratedBody
+          else return $ Lam lamBinderInfo (Unbound.bind paramName delaboratedBody)
+
+      _ -> Env.err [DS "Lambda expression should have a function type, not", DD expectedType]
+
+    _ -> delaborate term
 
 -- Check that a term is a type and return its universe level
 ensureType :: Term -> TcMonad Level
@@ -111,8 +148,10 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
     Lam lamBinderInfo bodyBinder -> whnf type' >>= \case
       Pi piBinderInfo paramType returnTypeBinder -> case (lamBinderInfo, piBinderInfo) of
         (Explicit, Implicit) -> do
-          mvar <- Env.newMVar paramType
-          checkType term $ Unbound.instantiate returnTypeBinder [mvar]
+          (paramName, returnType) <- Unbound.unbind returnTypeBinder
+          Env.addLocal paramName paramType $ checkType term returnType
+          -- mvar <- Env.newMVar paramType
+          -- checkType term $ Unbound.instantiate returnTypeBinder [mvar]
         _ | lamBinderInfo == piBinderInfo -> do
           (var, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder returnTypeBinder
           Env.addLocal var paramType $ checkType body returnType
@@ -147,7 +186,7 @@ instantiateMVars term = case term of
     (paramName, returnType) <- Unbound.unbind binder
     let instantiatedBinder = Unbound.bind paramName <$> instantiateMVars returnType
     Pi binderInfo <$> instantiateMVars paramType <*> instantiatedBinder
-  Ann inner hint -> Ann <$> instantiateMVars inner <*> instantiateMVars hint
+  Ann inner type' -> Ann <$> instantiateMVars inner <*> instantiateMVars type'
   _ -> return term
 
 -- Type-check a single top-level entry

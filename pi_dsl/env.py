@@ -159,3 +159,63 @@ class Env:
             List[bindings.Entry](*self.entry_bindings()), term.binding(), type_.binding()).get()
         if error.kind == Maybe.KIND_JUST:
             raise PiDslError(str(error.get_just()), tracing.from_bindings(traces.get()))
+
+    def elaborate(self, term: Term) -> Term:
+        either, traces = \
+            bindings.elaborate(List[bindings.Entry](*self.entry_bindings()), term.binding()).get()
+        match either.kind:
+            case Either.KIND_LEFT:
+                raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
+            case Either.KIND_RIGHT:
+                return binding_to_term(either.get_right(), self)
+
+    def delaborate(self, term: Term) -> Term:
+        either, traces = bindings.delaborate(
+            List[bindings.Entry](*self.entry_bindings()), term.binding()).get()
+        match either.kind:
+            case Either.KIND_LEFT:
+                raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
+            case Either.KIND_RIGHT:
+                return binding_to_term(either.get_right(), self)
+
+    def elaborate_against(self, term: Term, type_: Type) -> Term:
+        either, traces = bindings.elaborate_against(
+            List[bindings.Entry](*self.entry_bindings()), term.binding(), type_.binding()).get()
+        match either.kind:
+            case Either.KIND_LEFT:
+                raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
+            case Either.KIND_RIGHT:
+                return binding_to_term(either.get_right(), self)
+
+    def delaborate_against(self, term: Term, type_: Type) -> Term:
+        either, traces = bindings.delaborate_against(
+            List[bindings.Entry](*self.entry_bindings()), term.binding(), type_.binding()).get()
+        match either.kind:
+            case Either.KIND_LEFT:
+                raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
+            case Either.KIND_RIGHT:
+                return binding_to_term(either.get_right(), self)
+
+    def unify(self, term1: Term, term2: Term):
+        error, traces = bindings.unify(
+            List[bindings.Entry](*self.entry_bindings()), term1.binding(), term2.binding()).get()
+        if error.kind == Maybe.KIND_JUST:
+            raise PiDslError(str(error.get_just()), tracing.from_bindings(traces.get()))
+
+    def whnf(self, term: Term) -> Term:
+        either, traces = \
+            bindings.whnf(List[bindings.Entry](*self.entry_bindings()), term.binding()).get()
+        match either.kind:
+            case Either.KIND_LEFT:
+                raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
+            case Either.KIND_RIGHT:
+                return binding_to_term(either.get_right(), self)
+
+    def instantiate_mvars(self, term: Term) -> Term:
+        either, traces = bindings.instantiate_mvars(
+            List[bindings.Entry](*self.entry_bindings()), term.binding()).get()
+        match either.kind:
+            case Either.KIND_LEFT:
+                raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
+            case Either.KIND_RIGHT:
+                return binding_to_term(either.get_right(), self)

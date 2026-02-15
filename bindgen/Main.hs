@@ -1,4 +1,3 @@
--- Executable that generates Python ctypes bindings from Haskell types
 module Main where
 
 import Language.Haskell.TH qualified as TH
@@ -29,11 +28,32 @@ main = putStrLn $(do
   -- FFI wrapper for checking a term against an expected type
   checkType <- functionBinding "check_type" ["entries", "term", "type"]
     <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]] <*> [t| (Maybe String, [Trace]) |]
+  -- FFI wrapper for elaborating a term
+  elaborate <- functionBinding "elaborate" ["entries", "term"]
+    <$> sequence [[t| [Entry] |], [t|Term|]] <*> [t| (Either String Term, [Trace]) |]
+  -- FFI wrapper for removing implicit applications
+  delaborate <- functionBinding "delaborate" ["entries", "term"]
+    <$> sequence [[t| [Entry] |], [t|Term|]] <*> [t| (Either String Term, [Trace]) |]
+  -- FFI wrapper for delaborating against an expected type
+  delaborateAgainst <- functionBinding "delaborate_against" ["entries", "term", "type"]
+    <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]] <*> [t| (Either String Term, [Trace]) |]
+  -- FFI wrapper for elaborating a term against an expected type
+  elaborateAgainst <- functionBinding "elaborate_against" ["entries", "term", "type"]
+    <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]] <*> [t| (Either String Term, [Trace]) |]
+  -- FFI wrapper for unifying two terms
+  unify <- functionBinding "unify" ["entries", "term1", "term2"]
+    <$> sequence [[t| [Entry] |], [t|Term|], [t|Term|]] <*> [t| (Maybe String, [Trace]) |]
+  -- FFI wrapper for computing weak head normal form
+  whnf <- functionBinding "whnf" ["entries", "term"]
+    <$> sequence [[t| [Entry] |], [t|Term|]] <*> [t| (Either String Term, [Trace]) |]
+  -- FFI wrapper for instantiating metavariables
+  instantiateMVars <- functionBinding "instantiate_mvars" ["entries", "term"]
+    <$> sequence [[t| [Entry] |], [t|Term|]] <*> [t| (Either String Term, [Trace]) |]
   -- FFI wrapper for opening a binder
   unbind <- functionBinding "unbind" ["binding"]
-    <$> sequence [[t|Unbound.Bind TermName Term|]] <*> [t| (TermName, Term) |]
+    <$> sequence [[t| Unbound.Bind TermName Term |]] <*> [t| (TermName, Term) |]
   -- Helper to convert string to TH literal
   let stringify = TH.LitE . TH.StringL
   -- Collect all function bindings for export
-  let functionBindings = [bind, unbind, pprTerm, typeCheck, inferType, checkType]
+  let functionBindings = [bind, unbind, pprTerm, typeCheck, inferType, checkType, elaborate, delaborate, delaborateAgainst, elaborateAgainst, unify, whnf, instantiateMVars]
   return $ stringify $ generateBindings (bindings ++ functionBindings))

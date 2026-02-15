@@ -336,3 +336,31 @@ def infer_type(entries: List[Entry], term: Term) -> Tuple[Either[String, Type], 
 set_export_signature("check_type", [List[Entry], Term, Type], Tuple[Maybe[String], List[Trace]])
 def check_type(entries: List[Entry], term: Term, type: Type) -> Tuple[Maybe[String], List[Trace]]:
     return call_export("check_type", [entries, term, type])
+
+set_export_signature("elaborate", [List[Entry], Term], Tuple[Either[String, Term], List[Trace]])
+def elaborate(entries: List[Entry], term: Term) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("elaborate", [entries, term])
+
+set_export_signature("delaborate", [List[Entry], Term], Tuple[Either[String, Term], List[Trace]])
+def delaborate(entries: List[Entry], term: Term) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("delaborate", [entries, term])
+
+set_export_signature("delaborate_against", [List[Entry], Term, Type], Tuple[Either[String, Term], List[Trace]])
+def delaborate_against(entries: List[Entry], term: Term, type: Type) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("delaborate_against", [entries, term, type])
+
+set_export_signature("elaborate_against", [List[Entry], Term, Type], Tuple[Either[String, Term], List[Trace]])
+def elaborate_against(entries: List[Entry], term: Term, type: Type) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("elaborate_against", [entries, term, type])
+
+set_export_signature("unify", [List[Entry], Term, Term], Tuple[Maybe[String], List[Trace]])
+def unify(entries: List[Entry], term1: Term, term2: Term) -> Tuple[Maybe[String], List[Trace]]:
+    return call_export("unify", [entries, term1, term2])
+
+set_export_signature("whnf", [List[Entry], Term], Tuple[Either[String, Term], List[Trace]])
+def whnf(entries: List[Entry], term: Term) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("whnf", [entries, term])
+
+set_export_signature("instantiate_mvars", [List[Entry], Term], Tuple[Either[String, Term], List[Trace]])
+def instantiate_mvars(entries: List[Entry], term: Term) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("instantiate_mvars", [entries, term])

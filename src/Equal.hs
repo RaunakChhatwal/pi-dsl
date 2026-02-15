@@ -22,7 +22,7 @@ mvarOccursCheck id term = case term of
   Pi _ paramType binder -> do
     (_, returnType) <- Unbound.unbind binder
     (||) <$> mvarOccursCheck id paramType <*> mvarOccursCheck id returnType
-  Ann inner hint -> (||) <$> mvarOccursCheck id inner <*> mvarOccursCheck id hint
+  Ann inner type' -> (||) <$> mvarOccursCheck id inner <*> mvarOccursCheck id type'
   _ -> return False
 
 millerPatternCheck :: Term -> TcMonad (Maybe (Int, [TermName]))

@@ -12,6 +12,7 @@ import Data.Maybe (catMaybes, fromJust)
 import PrettyPrint (ppr)
 import Environment (Env, Trace, traceTcMonad)
 import TypeCheck
+import Equal (unify, whnf)
 import Control.Monad (join, forM_, when)
 import Data.Bifunctor (first)
 import Unbound.Generics.LocallyNameless.Unsafe (unsafeUnbind)
@@ -145,20 +146,56 @@ $(join $ exportFunction "type_check"
 $(join $ exportFunction "infer_type"
   <$> sequence [[t| [Entry] |], [t|Term|]]
   <*> [t| (Either String Type, [Trace]) |]
-  <*> [| \entries term ->
-            return $ traceTcMonad $ withEntries entries $ do
-              checkClosed term
-              inferType =<< elaborate term |])
+  <*> [| \entries term -> return $ traceTcMonad $ withEntries entries $ inferType term |])
 
 -- FFI export: check that a term has the expected type in the given environment
 $(join $ exportFunction "check_type"
   <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]]
   <*> [t| (Maybe String, [Trace]) |]
   <*> [| \entries term type' ->
-            return $ first eitherToMaybe $ traceTcMonad $ withEntries entries $ do
-              checkClosed type'
-              checkClosed term
-              elaboratedType <- elaborate type'
-              elaboratedTerm <- elaborateAgainst term elaboratedType
-              _ <- ensureType elaboratedType
-              checkType elaboratedTerm elaboratedType |])
+    return $ first eitherToMaybe $ traceTcMonad $ withEntries entries $ checkType term type' |])
+
+-- FFI export: elaborate a term to produce a well-typed version
+$(join $ exportFunction "elaborate"
+  <$> sequence [[t| [Entry] |], [t|Term|]]
+  <*> [t| (Either String Term, [Trace]) |]
+  <*> [| \entries term -> return $ traceTcMonad $ withEntries entries $ elaborate term |])
+
+-- FFI export: remove implicit applications from an elaborated term
+$(join $ exportFunction "delaborate"
+  <$> sequence [[t| [Entry] |], [t|Term|]]
+  <*> [t| (Either String Term, [Trace]) |]
+  <*> [| \entries term -> return $ traceTcMonad $ withEntries entries $ delaborate term |])
+
+-- FFI export: delaborate a term against an expected type
+$(join $ exportFunction "delaborate_against"
+  <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]]
+  <*> [t| (Either String Term, [Trace]) |]
+  <*> [| \entries term type' ->
+    return $ traceTcMonad $ withEntries entries $ delaborateAgainst term type' |])
+
+-- FFI export: elaborate a term against an expected type
+$(join $ exportFunction "elaborate_against"
+  <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]]
+  <*> [t| (Either String Term, [Trace]) |]
+  <*> [| \entries term type' ->
+    return $ traceTcMonad $ withEntries entries $ elaborateAgainst term type' |])
+
+-- FFI export: unify two terms
+$(join $ exportFunction "unify"
+  <$> sequence [[t| [Entry] |], [t|Term|], [t|Term|]]
+  <*> [t| (Maybe String, [Trace]) |]
+  <*> [| \entries term1 term2 ->
+    return $ first eitherToMaybe $ traceTcMonad $ withEntries entries $ unify term1 term2 |])
+
+-- FFI export: compute weak head normal form of a term
+$(join $ exportFunction "whnf"
+  <$> sequence [[t| [Entry] |], [t|Term|]]
+  <*> [t| (Either String Term, [Trace]) |]
+  <*> [| \entries term -> return $ traceTcMonad $ withEntries entries $ whnf term |])
+
+-- FFI export: instantiate metavariables in a term
+$(join $ exportFunction "instantiate_mvars"
+  <$> sequence [[t| [Entry] |], [t|Term|]]
+  <*> [t| (Either String Term, [Trace]) |]
+  <*> [| \entries term -> return $ traceTcMonad $ withEntries entries $ instantiateMVars term |])
