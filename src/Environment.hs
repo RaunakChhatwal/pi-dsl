@@ -6,14 +6,14 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Control.Monad.State.Class qualified as State
 import PrettyPrint (D(..), Disp(..), Doc, ppr)
-import Syntax (CtorName, DataTypeName, Term(..), TermName, Type, Var(Global, Local, Meta))
+import Syntax
 import Text.PrettyPrint.HughesPJ (($$), sep)
-import qualified Unbound.Generics.LocallyNameless as Unbound
+import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Bifunctor (second)
 import Streaming (Stream, Of)
-import qualified Streaming.Prelude as S
+import Streaming.Prelude qualified as S
 import Data.Map (Map)
-import qualified Data.Map as Map
+import Data.Map qualified as Map
 import Control.Monad.State (StateT(runStateT))
 
 -- Trace events for debugging type checking execution
@@ -59,7 +59,7 @@ traceTcMonad stream = go stream 0 emptyTcState where
       Right ((Left result, _), _) -> (Right result, [])
       Right ((Right (trace, restStream), newFreshState), newTcState) ->
         second (trace :) (go restStream newFreshState newTcState)
-  emptyEnv = Env Map.empty Map.empty Map.empty Nothing
+  emptyEnv = Env Map.empty Map.empty emptyLocalContext Nothing
 
 data TcState = TcState {
   mvarCounter :: Int,
@@ -71,10 +71,18 @@ emptyTcState :: TcState
 emptyTcState = TcState 0 Map.empty Map.empty
 
 -- Type checking environment with data types, declarations, and local bindings
+data LocalContext = LocalContext {
+  locals :: Map TermName Type,
+  reverseOrderedLocals :: [(TermName, Type)]
+}
+
+emptyLocalContext :: LocalContext
+emptyLocalContext = LocalContext Map.empty []
+
 data Env = Env {
   datatypes :: Map DataTypeName (Type, [(CtorName, Type)]),
   decls :: Map String (Type, Term),
-  locals :: Map TermName Type,
+  localCtx :: LocalContext,
   dataTypeBeingDeclared :: Maybe (DataTypeName, Type)
 }
 
@@ -82,11 +90,13 @@ newMVar :: Type -> TcMonad Term
 newMVar type' = do
   tcState <- State.get
   let id = mvarCounter tcState
+  ctx <- asks (reverse . reverseOrderedLocals . localCtx)
+  let mvarType = foldr (\(var, type') acc -> Pi Explicit type' (Unbound.bind var acc)) type' ctx
   State.put $ tcState {
     mvarCounter = id + 1,
-    mvarTypes = Map.insert id type' (mvarTypes tcState)
+    mvarTypes = Map.insert id mvarType (mvarTypes tcState)
   }
-  return $ Var (Meta id)
+  return $ foldl App (Var (Meta id)) (map (lVar . fst) ctx)
 
 lookUpMVarType :: Int -> TcMonad Type
 lookUpMVarType id = do
@@ -109,7 +119,7 @@ lookUpDecl var = asks (Map.lookup var . decls)
 
 -- Look up the type of a variable
 lookUpType :: Var -> TcMonad Type
-lookUpType (Local name) = asks (Map.lookup name . locals) >>= \case
+lookUpType (Local name) = asks (Map.lookup name . locals . localCtx) >>= \case
   Just type' -> return type'
   Nothing -> err [DS "Local variable", DD name, DS "not found"]
 lookUpType (Global name) = asks (Map.lookup name . decls) >>= \case
@@ -117,9 +127,14 @@ lookUpType (Global name) = asks (Map.lookup name . decls) >>= \case
   Nothing -> err [DS "Global variable", DD name, DS "not found"]
 lookUpType (Meta id) = lookUpMVarType id
 
--- Add a local variable binding to the environment
+-- Add a local variable to the environment
 addLocal :: TermName -> Type -> TcMonad a -> TcMonad a
-addLocal var type' = local $ \env@(Env _ _ locals _) -> env { locals = Map.insert var type' locals }
+addLocal var type' monad = do
+  LocalContext map list <- asks localCtx
+  newLocalContext <- case Map.lookup var map of
+    Just _ -> err [DS "Attempted to add local", DD var, DS "when already exists"]
+    Nothing -> return $ LocalContext (Map.insert var type' map) ((var, type') : list)
+  local (\env -> env { localCtx = newLocalContext }) monad
 
 -- Add a data type definition to the environment
 addDataType :: DataTypeName -> Type -> [(CtorName, Type)] -> TcMonad a -> TcMonad a

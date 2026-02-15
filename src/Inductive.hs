@@ -31,9 +31,8 @@ motiveFromTypeSignature :: TermName -> DataTypeName -> [TermName] -> Type -> TcM
 motiveFromTypeSignature hole typeName paramNames = whnf >=> \case
   Pi binderInfo paramType bind -> do
     (paramName, returnType) <- Unbound.unbind bind
-    let newParamNames = if binderInfo == Explicit then paramName : paramNames else paramNames
     addParam (binderInfo, paramName, paramType) <$>
-      motiveFromTypeSignature hole typeName newParamNames returnType
+      motiveFromTypeSignature hole typeName (paramName : paramNames) returnType
   returnType -> do
     let fullyApplied = foldl App (DataType typeName) $ map lVar $ reverse paramNames
     case returnType of
@@ -81,9 +80,8 @@ motiveFromSelf :: TermName -> TermName -> DataTypeName -> [TermName] -> Type -> 
 motiveFromSelf motive selfName typeName paramNames = whnf >=> \case
   Pi binderInfo paramType binder -> do
     (paramName, returnType) <- Unbound.unbind binder
-    let newParamNames = if binderInfo == Explicit then paramName : paramNames else paramNames
     addParam (binderInfo, paramName, paramType) <$>
-      motiveFromSelf motive selfName typeName newParamNames returnType
+      motiveFromSelf motive selfName typeName (paramName : paramNames) returnType
   _ -> do
     let selfApplied = foldl App (DataType typeName) $ map lVar $ reverse paramNames
     let motiveApplied =
@@ -95,7 +93,7 @@ synthesizeRecursorType :: DataTypeName -> TcMonad Type
 synthesizeRecursorType typeName = do
   (signature, ctorDefs) <- lookUpDataType typeName
 
-  -- Use fresh binder names to avoid capturing user variables like `motive`/`self`.
+  -- Use fresh names to avoid capturing user variables like `motive`/`self`.
   motive <- freshName "motive"
   selfName <- freshName "self"
   hole <- freshName "_"
@@ -109,10 +107,10 @@ synthesizeRecursorType typeName = do
     foldr (addParam . (Explicit, hole,)) motiveParam cases
 
 -- Unfold a nested Pi type into parameter types and return type
-unfoldPi :: TC m => Type -> m ([(BinderInfo, Type)], Type)
-unfoldPi (Pi binderInfo paramType binder) = do
+unfoldPi :: TC m => Type -> m ([Type], Type)
+unfoldPi (Pi _ paramType binder) = do
   (_, returnType) <- Unbound.unbind binder
-  first ((binderInfo, paramType) :) <$> unfoldPi returnType
+  first (paramType :) <$> unfoldPi returnType
 unfoldPi returnType = return ([], returnType)
 
 -- Split recursor arguments into cases, scrutinee, and extra args
@@ -155,7 +153,7 @@ argsForCase typeName partialRecursor ctorArgs ctorType = go ctorType ctorArgs []
       (Pi Implicit paramType bind, args) -> do
         (paramName, returnType) <- Unbound.unbind bind
         mvar <- newMVar paramType
-        go returnType args $ (paramName, mvar) : prevCtorArgs
+        (mvar :) <$> go returnType args ((paramName, mvar) : prevCtorArgs)
       (_, args) -> assert (null args) $ return []
 
 -- Attempt to reduce a recursor application to a case
@@ -165,7 +163,7 @@ reduceRecursor typeName (motive:args) =
   traceM "reduceRecursor" (typeName : ppr motive : map ppr args) ppr $ do
     (typeSignature, ctors) <- lookUpDataType typeName
     (params, _) <- unfoldPi typeSignature
-    let numTypeArgs = length $ filter ((Explicit ==) . fst) params
+    let numTypeArgs = length params
     (cases, (scrutinee, extraArgs)) <- splitReducerArgs (length ctors) numTypeArgs args
     (Ctor scrutineeTypeName ctorName, ctorArgs) <- unfoldApps <$> lift (whnf scrutinee)
     guard $ scrutineeTypeName == typeName
@@ -219,6 +217,6 @@ checkDataTypeDecl typeName typeSignature ctors = do
   forM_ ctors $ \(ctorName, ctorType) -> do
     let addSelfToEnv env = env { dataTypeBeingDeclared = Just (typeName, typeSignature) }
     _ <- local addSelfToEnv $ ensureType ctorType
-    ((_, paramTypes), returnType) <- first unzip <$> unfoldPi ctorType
+    (paramTypes, returnType) <- unfoldPi ctorType
     checkCtorReturnsSelf ctorName typeName =<< Equal.whnf returnType
     mapM (checkStrictPositivity typeName) paramTypes

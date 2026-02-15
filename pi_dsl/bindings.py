@@ -241,6 +241,19 @@ class Term(TaggedUnion):
         assert self.kind == self.KIND_REC
         return self.get_field(DataTypeName)
 
+class LocalContext(TaggedUnion):
+    kind: Literal[0]
+    
+    KIND_LOCAL_CONTEXT = 0
+    
+    @classmethod
+    def init_local_context(cls, *values: *tuple[Map[TermName, Type], List[Tuple[TermName, Type]]]):
+        return cls(cls.KIND_LOCAL_CONTEXT, init_tuple(*values))
+    
+    def get_local_context(self) -> tuple[Map[TermName, Type], List[Tuple[TermName, Type]]]:
+        assert self.kind == self.KIND_LOCAL_CONTEXT
+        return self.get_field(Tuple[Map[TermName, Type], List[Tuple[TermName, Type]]]).get()
+
 class Maybe[T1](TaggedUnion):
     kind: Literal[0, 1]
     
@@ -261,12 +274,12 @@ class Env(TaggedUnion):
     KIND_ENV = 0
     
     @classmethod
-    def init_env(cls, *values: *tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type], Maybe[Tuple[DataTypeName, Type]]]):
+    def init_env(cls, *values: *tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], LocalContext, Maybe[Tuple[DataTypeName, Type]]]):
         return cls(cls.KIND_ENV, init_tuple(*values))
     
-    def get_env(self) -> tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type], Maybe[Tuple[DataTypeName, Type]]]:
+    def get_env(self) -> tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], LocalContext, Maybe[Tuple[DataTypeName, Type]]]:
         assert self.kind == self.KIND_ENV
-        return self.get_field(Tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], Map[TermName, Type], Maybe[Tuple[DataTypeName, Type]]]).get()
+        return self.get_field(Tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], LocalContext, Maybe[Tuple[DataTypeName, Type]]]).get()
 
 class Entry(TaggedUnion):
     kind: Literal[0, 1]
