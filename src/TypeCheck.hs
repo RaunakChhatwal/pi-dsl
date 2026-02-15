@@ -40,9 +40,7 @@ elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
 
   _ -> return term
 
--- Elaborate a term against an expected type.
--- This is primarily used to eta-expand implicit binders (so the term arity matches its type)
--- and to elaborate inside lambda bodies under the right local context.
+-- Elaborate a term against an expected type
 elaborateAgainst :: Term -> Type -> TcMonad Term
 elaborateAgainst term expectedType = traceM "elaborateAgainst" [ppr term, ppr expectedType] ppr $
   whnf expectedType >>= \case
@@ -127,10 +125,8 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
 
 -- Verify that a term has no free/meta variables
 checkClosed :: Term -> TcMonad ()
-checkClosed (Var (Local var)) = when (Unbound.isFreeName var) $
-  Env.err [DS "Expected closed expressions as input but found free variable:", DD var]
-checkClosed mvar@(Var (Meta _)) =
-  Env.err [DS "Expected closed expressions as input but found metavariable:", DD mvar]
+checkClosed (Var (Local var)) = when (Unbound.isFreeName var) $ Env.err [DS "Closed check failed"]
+checkClosed (Var (Meta _)) = Env.err [DS "Closed check failed"]
 checkClosed (Lam _ (Unbound.B _ body)) = checkClosed body
 checkClosed (App func arg) = checkClosed func >> checkClosed arg
 checkClosed (Pi _ paramType (Unbound.B _ returnType)) =
@@ -138,27 +134,59 @@ checkClosed (Pi _ paramType (Unbound.B _ returnType)) =
 checkClosed (Ann term type') = checkClosed term >> checkClosed type'
 checkClosed _ = return ()
 
+instantiateMVars :: Term -> TcMonad Term
+instantiateMVars term = case term of
+  Var (Meta id) -> Env.lookUpMVarSolution id >>= \case
+    Just soln -> instantiateMVars soln
+    Nothing -> return term
+  App func arg -> App <$> instantiateMVars func <*> instantiateMVars arg
+  Lam binderInfo binder -> do
+    (paramName, body) <- Unbound.unbind binder
+    Lam binderInfo . Unbound.bind paramName <$> instantiateMVars body
+  Pi binderInfo paramType binder -> do
+    (paramName, returnType) <- Unbound.unbind binder
+    let instantiatedBinder = Unbound.bind paramName <$> instantiateMVars returnType
+    Pi binderInfo <$> instantiateMVars paramType <*> instantiatedBinder
+  Ann inner hint -> Ann <$> instantiateMVars inner <*> instantiateMVars hint
+  _ -> return term
+
 -- Type-check a single top-level entry
 addEntry :: Entry -> TcMonad a -> TcMonad (TcMonad a)
 addEntry entry continuation = traceM "tcEntry" [ppr entry] (const "") $ case entry of
   Decl var type' term -> do
     checkClosed type'
     checkClosed term
+
     elaboratedType <- elaborate type'
     _ <- ensureType elaboratedType
     elaboratedTerm <- elaborateAgainst term elaboratedType
     checkType elaboratedTerm elaboratedType
-    return $ Env.addDecl var elaboratedType elaboratedTerm continuation
+
+    instantiatedType <- instantiateMVars elaboratedType
+    instantiatedTerm <- instantiateMVars elaboratedTerm
+    checkClosed instantiatedType
+    checkClosed instantiatedTerm
+
+    return $ Env.addDecl var instantiatedType instantiatedTerm continuation
+
   Data typeName typeSignature ctors -> do
     checkClosed typeSignature
     mapM_ (checkClosed . snd) ctors
+
     elaboratedTypeSignature <- elaborate typeSignature
     let addSelfToEnv env =
           env { Env.dataTypeBeingDeclared = Just (typeName, elaboratedTypeSignature) }
     elaboratedCtors <- sequence
       [(ctorName,) <$> local addSelfToEnv (elaborate ctorType) | (ctorName, ctorType) <- ctors]
     checkDataTypeDecl typeName elaboratedTypeSignature elaboratedCtors
-    return $ Env.addDataType typeName elaboratedTypeSignature elaboratedCtors continuation
+
+    instantiatedTypeSignature <- instantiateMVars elaboratedTypeSignature
+    instantiatedCtors <- sequence
+      [(ctorName,) <$> instantiateMVars ctorType | (ctorName, ctorType) <- elaboratedCtors]
+    checkClosed instantiatedTypeSignature
+    mapM_ (checkClosed . snd) instantiatedCtors
+
+    return $ Env.addDataType typeName instantiatedTypeSignature instantiatedCtors continuation
 
 -- Run a computation with entries added to the environment
 withEntries :: [Entry] -> TcMonad a -> TcMonad a
