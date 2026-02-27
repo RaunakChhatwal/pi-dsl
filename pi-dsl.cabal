@@ -18,7 +18,7 @@ common shared-properties
     LambdaCase
     ParallelListComp
 
-  ghc-options: -Wall -Wno-name-shadowing -Wno-orphans
+  ghc-options: -Wall -Wno-name-shadowing -Wno-orphans -fno-ignore-asserts
   build-depends:
     base,
     mtl,

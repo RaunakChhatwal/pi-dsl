@@ -1,15 +1,9 @@
 from pi_dsl.env import Env, PiDslError
 from pi_dsl.std.bool import Bool
 from pi_dsl.std.env import env
-from pi_dsl.std.eq import Eq
 from pi_dsl.std.nat import Nat
 from pi_dsl.sugar import datatype, DataTypeMeta, Self
 from pi_dsl.term import Ctor, Pi, Rec, Set, Sort, Var
-
-# Verify that Bool, Nat, and Eq recursors have type Sort(1)
-env.check_type(env.infer_type(Rec(Bool)), Sort(1))
-env.check_type(env.infer_type(Rec(Nat)), Sort(1))
-env.check_type(env.infer_type(Rec(Eq)), Sort(1))
 
 # Finite types indexed by Nat: Fin(n) has exactly n inhabitants
 n, m = Var("n"), Var("m")

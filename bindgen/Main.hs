@@ -1,10 +1,10 @@
 module Main where
 
 import Language.Haskell.TH qualified as TH
-import Bindings (bindingFromName, buildDeclOrder, functionBinding, generateBindings)
-import Environment (Env, Trace)
-import Syntax (Entry, Term, Type, TermName)
-import qualified Unbound.Generics.LocallyNameless as Unbound
+import Unbound.Generics.LocallyNameless qualified as Unbound
+import Bindings
+import Environment
+import Syntax
 
 -- Entry point: prints generated Python bindings to stdout
 main :: IO ()

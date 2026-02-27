@@ -5,7 +5,7 @@ import Control.Monad.Reader (MonadReader(local), asks, ReaderT(runReaderT))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Control.Monad.State.Class qualified as State
-import PrettyPrint (D(..), Disp(..), Doc, ppr)
+import PrettyPrint
 import Syntax
 import Text.PrettyPrint.HughesPJ (($$), sep)
 import Unbound.Generics.LocallyNameless qualified as Unbound

@@ -7,9 +7,9 @@ import Data.Foldable (foldrM)
 import Data.List (nub)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Unbound.Generics.LocallyNameless.Internal.Fold qualified as Unbound
-import Environment (assignMVar, err, lookUpDecl, lookUpMVarSolution, TcMonad, traceM)
-import Inductive (reduceRecursor)
-import PrettyPrint (D(DS, DD), ppr)
+import Environment
+import Inductive
+import PrettyPrint
 import Syntax
 
 mvarOccursCheck :: Int -> Term -> TcMonad Bool
@@ -49,15 +49,15 @@ solveMVar id args term = lookUpMVarSolution id >>= \case
 
 unify :: Term -> Term -> TcMonad ()
 unify term1 term2 = traceM "unify" [ppr term1, ppr term2] (const "") $ do
-  nf1 <- whnf term1
-  nf2 <- whnf term2
-  (,) <$> millerPatternCheck nf1 <*> millerPatternCheck nf2 >>= \case
+  term1 <- whnf term1
+  term2 <- whnf term2
+  (,) <$> millerPatternCheck term1 <*> millerPatternCheck term2 >>= \case
     (Just (id1, args1), Just (id2, args2)) | id1 == id2 && length args1 == length args2 ->
       zipWithM_ unify (map lVar args1) (map lVar args2)
-    (Just (id, args), _) -> solveMVar id args nf2
-    (_, Just (id, args)) -> solveMVar id args nf1
+    (Just (id, args), _) -> solveMVar id args term2
+    (_, Just (id, args)) -> solveMVar id args term1
 
-    _ -> case (nf1, nf2) of
+    _ -> case (term1, term2) of
       (Lam binderInfo1 binder1, Lam binderInfo2 binder2) | binderInfo1 == binderInfo2 -> do
         (_, body1, _, body2) <- lift $ Unbound.unbind2Plus binder1 binder2
         unify body1 body2
@@ -71,9 +71,9 @@ unify term1 term2 = traceM "unify" [ppr term1, ppr term2] (const "") $ do
           (_, returnType1, _, returnType2) <- lift $ Unbound.unbind2Plus binder1 binder2
           unify returnType1 returnType2
 
-      _ | Unbound.aeq nf1 nf2 -> return ()
+      _ | Unbound.aeq term1 term2 -> return ()
 
-      _ -> err [DS "Expected", DD nf2, DS "but found", DD nf1]
+      _ -> err [DS "Expected", DD term2, DS "but found", DD term1]
 
 -- Convert a term to its weak-head normal form, only accepts well typed terms
 whnf :: Term -> TcMonad Term

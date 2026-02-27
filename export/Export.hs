@@ -4,15 +4,15 @@ module Export where
 
 import Foreign qualified as F
 import Foreign.C.Types qualified as F
-import Bindings (buildDeclOrder)
+import Bindings
 import FFI
-import Syntax(Entry, Term, TermName, Type)
+import Syntax
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Maybe (catMaybes, fromJust)
-import PrettyPrint (ppr)
-import Environment (Env, Trace, traceTcMonad)
+import PrettyPrint
+import Environment
 import TypeCheck
-import Equal (unify, whnf)
+import Equal
 import Control.Monad (join, forM_, when)
 import Data.Bifunctor (first)
 import Unbound.Generics.LocallyNameless.Unsafe (unsafeUnbind)
