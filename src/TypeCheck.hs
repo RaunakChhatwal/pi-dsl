@@ -2,9 +2,11 @@ module TypeCheck where
 
 import Control.Monad (join, when, unless)
 import Control.Monad.Trans (lift)
+import Control.Monad.Except (throwError)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Unbound.Generics.LocallyNameless.Bind qualified as Unbound
 import Unbound.Generics.LocallyNameless.Internal.Fold (toListOf)
+import Data.String.Interpolate (i)
 import Environment
 import Equal
 import PrettyPrint
@@ -36,7 +38,7 @@ elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
     elaboratedTerm <- elaborateAgainst inner elaboratedType
     return $ Ann elaboratedTerm elaboratedType
 
-  Lam _ _ -> err [DS "Unguided lambda elaboration not implemented"]
+  Lam _ _ -> throwError "Unguided lambda elaboration not implemented"
 
   _ -> return term
 
@@ -56,7 +58,7 @@ elaborateAgainst term expectedType = traceM "elaborateAgainst" [ppr term, ppr ex
           elaboratedBody <- addLocal paramName paramType $ elaborateAgainst body returnType
           return $ Lam lamBinderInfo $ Unbound.bind paramName elaboratedBody
 
-        _ -> err [DS "Expected explicit parameter but received implicit lambda"]
+        _ -> throwError "Expected explicit parameter but received implicit lambda"
 
       _ -> err [DS "Lambda expression should have a function type, not", DD expectedType]
 
@@ -79,7 +81,7 @@ delaborate term = traceM "delaborate" [ppr term] ppr $ case term of
 
   Ann inner type' -> Ann <$> delaborateAgainst inner type' <*> delaborate type'
 
-  Lam _ _ -> err [DS "Unguided lambda delaboration not implemented"]
+  Lam _ _ -> throwError "Unguided lambda delaboration not implemented"
 
   _ -> return term
 
@@ -90,7 +92,7 @@ delaborateAgainst term expectedType = traceM "delaborateAgainst" [ppr term, ppr 
     Lam lamBinderInfo bodyBinder -> whnf expectedType >>= \case
       Pi piBinderInfo paramType returnTypeBinder -> do
         unless (lamBinderInfo == piBinderInfo) $
-          err [DS "Lambda binder does not match expected function binder"]
+          throwError "Lambda binder does not match expected function binder"
         (paramName, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder returnTypeBinder
         delaboratedBody <- addLocal paramName paramType $ delaborateAgainst body returnType
         if lamBinderInfo == Implicit && paramName `notElem` toListOf Unbound.fv delaboratedBody
@@ -114,7 +116,7 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
 
   Sort level -> return $ Sort $ Succ level
 
-  Lam _ _ -> err [DS "Lambda inference not implemented (add a type annotation)"]
+  Lam _ _ -> throwError "Lambda inference not implemented (add a type annotation)"
 
   Pi _ paramType binder -> do
     (paramName, returnType) <- Unbound.unbind binder
@@ -152,7 +154,7 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
         _ | lamBinderInfo == piBinderInfo -> do
           (var, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder returnTypeBinder
           addLocal var paramType $ checkType body returnType
-        _ -> err [DS "Expected explicit parameter but received implicit lambda"]
+        _ -> throwError "Expected explicit parameter but received implicit lambda"
       _ -> err [DS "Lambda expression should have a function type, not", DD type']
 
     _ -> do
@@ -161,8 +163,9 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
 
 -- Verify that a term has no free/meta variables
 checkClosed :: Term -> TcMonad ()
-checkClosed (Var (Local var)) = when (Unbound.isFreeName var) $ err [DS "Closed check failed"]
-checkClosed (Var (Meta _)) = err [DS "Closed check failed"]
+checkClosed (Var (Local var)) = when (Unbound.isFreeName var) $
+  throwError [i|Closed check failed: free local #{ppr var}|]
+checkClosed (Var (Meta id)) = throwError [i|Closed check failed: unresolved meta ?#{id}|]
 checkClosed (Lam _ (Unbound.B _ body)) = checkClosed body
 checkClosed (App func arg) = checkClosed func >> checkClosed arg
 checkClosed (Pi _ paramType (Unbound.B _ returnType)) =

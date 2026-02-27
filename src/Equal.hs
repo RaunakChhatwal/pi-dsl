@@ -1,10 +1,12 @@
 module Equal (whnf, unify) where
 
 import Control.Monad (zipWithM_, unless)
+import Control.Monad.Except (throwError)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Foldable (foldrM)
 import Data.List (nub)
+import Data.String.Interpolate (i)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Unbound.Generics.LocallyNameless.Internal.Fold qualified as Unbound
 import Environment
@@ -40,7 +42,7 @@ solveMVar :: Int -> [TermName] -> Term -> TcMonad ()
 solveMVar id args term = lookUpMVarSolution id >>= \case
   Just soln -> unify (foldl App soln $ map lVar args) term
   Nothing -> mvarOccursCheck id term >>= \case
-    True -> err [DS $ "Occurs check failed for ?" ++ show id ++ " in", DD term]
+    True -> err [DS [i|"Occurs check failed for ?#{id} in"|], DD term]
     False -> do
       let soln = foldr (\arg body -> Lam Explicit (Unbound.bind arg body)) term args
       unless (null $ Unbound.toListOf @Term @TermName Unbound.fv soln) $
@@ -80,7 +82,7 @@ whnf :: Term -> TcMonad Term
 whnf term = traceM "whnf" [ppr term] ppr $ case term of
   Var (Global var) -> lookUpDecl var >>= \case
     Just (_, def) -> whnf def
-    Nothing -> err [DS "Global variable", DD var, DS "not found"]
+    Nothing -> throwError [i|Global variable #{var} not found|]
 
   Var (Meta id) -> lookUpMVarSolution id >>= \case
     Just soln -> whnf soln

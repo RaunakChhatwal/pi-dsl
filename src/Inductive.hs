@@ -3,6 +3,7 @@ module Inductive (checkDataTypeDecl, reduceRecursor, synthesizeRecursorType) whe
 import Control.Applicative (Alternative(empty))
 import Control.Exception (assert)
 import Control.Monad ((>=>), forM, forM_, guard, when, unless)
+import Control.Monad.Except (throwError)
 import Control.Monad.Reader (local)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT)
@@ -11,6 +12,7 @@ import Data.Foldable (find)
 import Data.Functor ((<&>))
 import Data.List (nub)
 import Data.Maybe (fromJust)
+import Data.String.Interpolate (i)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Environment
 import {-# SOURCE #-} Equal
@@ -167,7 +169,7 @@ checkCtorReturnsSelf :: CtorName -> DataTypeName -> Type -> TcMonad ()
 checkCtorReturnsSelf _ self (DataType typeName) | typeName == self = return ()
 checkCtorReturnsSelf ctorName self (App typeCtor _) = checkCtorReturnsSelf ctorName self typeCtor
 checkCtorReturnsSelf ctorName self _ =
-  err [DS "Constructor", DD ctorName, DS "must return", DD self]
+  throwError [i|Constructor #{ctorName} must return #{self}|]
 
 -- Error if the data type name appears in the given type
 throwIfFound :: DataTypeName -> Type -> TcMonad ()
@@ -181,7 +183,7 @@ throwIfFound typeName type' = whnf type' >>= \case
     (_, returnType) <- Unbound.unbind binder
     throwIfFound typeName returnType
   DataType name -> when (name == typeName) $
-    err [DS "Invalid recursive occurrence of data type", DD typeName, DS "during declaration"]
+    throwError [i|Invalid recursive occurrence of data type #{typeName} during declaration|]
   _ -> return ()
 
 -- Check that the data type occurs only strictly positively in a type
@@ -206,7 +208,7 @@ checkDataTypeDecl typeName typeSignature ctors = do
     _ -> err [DS "Expected", DD typeName, DS "signature to return a Sort, but got", DD returnType]
 
   unless (length ctors == length (nub $ map fst ctors)) $
-    err [DS "Duplicate constructor(s) found in", DD typeName, DS "definition"]
+    throwError [i|Duplicate constructor(s) found in #{typeName} definition|]
   forM_ ctors $ \(ctorName, ctorType) -> do
     let addSelfToEnv env = env { dataTypeBeingDeclared = Just (typeName, typeSignature) }
     _ <- local addSelfToEnv $ ensureType ctorType

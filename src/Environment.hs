@@ -5,9 +5,10 @@ import Control.Monad.Reader (MonadReader(local), asks, ReaderT(runReaderT))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Control.Monad.State.Class qualified as State
+import Data.String.Interpolate (i)
 import PrettyPrint
 import Syntax
-import Text.PrettyPrint.HughesPJ (($$), sep)
+import Text.PrettyPrint.HughesPJ (render, sep)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Bifunctor (second)
 import Streaming (Stream, Of)
@@ -28,14 +29,14 @@ traceM funcName args toStr monad = do
   return result
 
 -- The main type checking monad with tracing, fresh names, environment, and errors
-type TcMonad = Stream (Of Trace) (Unbound.FreshMT (StateT TcState (ReaderT Env (Except Err))))
+type TcMonad = Stream (Of Trace) (Unbound.FreshMT (StateT TcState (ReaderT Env (Except String))))
 
 -- Fresh instance for Stream to generate fresh names
 instance Unbound.Fresh m => Unbound.Fresh (Stream (Of Trace) m) where
   fresh = lift . Unbound.fresh
 
 -- Type checking monad constraint with error handling, environment, and fresh names
-class (MonadError Err m, MonadReader Env m, Unbound.Fresh m) => TC m where
+class (MonadError String m, MonadReader Env m, Unbound.Fresh m) => TC m where
   yield :: Trace -> m ()
 
 -- TC instance for the main type checking monad
@@ -55,11 +56,13 @@ traceTcMonad stream = go stream 0 emptyTcState where
           (runStateT
             (runStateT
               (Unbound.unFreshMT $ S.next stream) freshState) tcState) emptyEnv of
-      Left error -> (Left $ ppr error, [])
+      Left error -> (Left error, [])
       Right ((Left result, _), _) -> (Right result, [])
       Right ((Right (trace, restStream), newFreshState), newTcState) ->
         second (trace :) (go restStream newFreshState newTcState)
   emptyEnv = Env Map.empty Map.empty emptyLocalContext Nothing
+  emptyLocalContext = LocalContext Map.empty []
+  emptyTcState = TcState 0 Map.empty Map.empty
 
 data TcState = TcState {
   mvarCounter :: Int,
@@ -67,17 +70,11 @@ data TcState = TcState {
   mvarSolutions :: Map Int Term
 }
 
-emptyTcState :: TcState
-emptyTcState = TcState 0 Map.empty Map.empty
-
 -- Type checking environment with data types, declarations, and local bindings
 data LocalContext = LocalContext {
   locals :: Map TermName Type,
   reverseOrderedLocals :: [(TermName, Type)]
 }
-
-emptyLocalContext :: LocalContext
-emptyLocalContext = LocalContext Map.empty []
 
 data Env = Env {
   datatypes :: Map DataTypeName (Type, [(CtorName, Type)]),
@@ -103,7 +100,7 @@ lookUpMVarType id = do
   tcState <- State.get
   case Map.lookup id (mvarTypes tcState) of
     Just type' -> return type'
-    Nothing -> err [DS "Meta", DD id, DS "not found"]
+    Nothing -> throwError [i|Meta #{id} not found|]
 
 lookUpMVarSolution :: Int -> TcMonad (Maybe Term)
 lookUpMVarSolution id = Map.lookup id . mvarSolutions <$> State.get
@@ -121,10 +118,10 @@ lookUpDecl var = asks (Map.lookup var . decls)
 lookUpType :: Var -> TcMonad Type
 lookUpType (Local name) = asks (Map.lookup name . locals . localCtx) >>= \case
   Just type' -> return type'
-  Nothing -> err [DS "Local variable", DD name, DS "not found"]
+  Nothing -> throwError [i|Local variable #{ppr name} not found|]
 lookUpType (Global name) = asks (Map.lookup name . decls) >>= \case
   Just (type', _) -> return type'
-  Nothing -> err [DS "Global variable", DD name, DS "not found"]
+  Nothing -> throwError [i|Global variable #{name} not found|]
 lookUpType (Meta id) = lookUpMVarType id
 
 -- Add a local variable to the environment
@@ -132,7 +129,7 @@ addLocal :: TermName -> Type -> TcMonad a -> TcMonad a
 addLocal var type' monad = do
   LocalContext map list <- asks localCtx
   newLocalContext <- case Map.lookup var map of
-    Just _ -> err [DS "Attempted to add local", DD var, DS "when already exists"]
+    Just _ -> throwError [i|Attempted to add local #{ppr var} when already exists|]
     Nothing -> return $ LocalContext (Map.insert var type' map) ((var, type') : list)
   local (\env -> env { localCtx = newLocalContext }) monad
 
@@ -141,22 +138,22 @@ addDataType :: DataTypeName -> Type -> [(CtorName, Type)] -> TcMonad a -> TcMona
 addDataType name signature ctors monad = asks (Map.lookup name . datatypes) >>= \case
   Nothing -> flip local monad $
     \env@(Env datatypes _ _ _) -> env { datatypes = Map.insert name (signature, ctors) datatypes }
-  Just _ -> err [DS "Name conflict when declaring data type", DD name]
+  Just _ -> throwError [i|Name conflict when declaring data type #{name}|]
 
 -- Add a global declaration to the environment
 addDecl :: String -> Type -> Term -> TcMonad a -> TcMonad a
 addDecl var type' def monad = asks (Map.lookup var . decls) >>= \case
   Nothing -> flip local monad $
     \env@(Env _ decls _ _) -> env { decls = Map.insert var (type', def) decls }
-  Just _ -> err [DS "Name conflict when declaring variable", DD var]
+  Just _ -> throwError [i|Name conflict when declaring variable #{var}|]
 
 -- Look up a data type definition by name
 lookUpDataType :: TC m => DataTypeName -> m (Type, [(CtorName, Type)])
 lookUpDataType typeName = asks (Map.lookup typeName . datatypes) >>= \case
   Just dataTypeDef -> return dataTypeDef
   Nothing -> asks dataTypeBeingDeclared >>= \case
-    Just _ -> err [DS "Definition of data type", DD typeName, DS "not found"]
-    Nothing -> err [DS "Data type", DD typeName, DS "not found"]
+    Just _ -> throwError [i|Definition of data type #{typeName} not found|]
+    Nothing -> throwError [i|Data type #{typeName} not found|]
 
 -- Look up the type signature of a data type
 lookUpTypeOfDataType :: DataTypeName -> TcMonad Type
@@ -164,45 +161,20 @@ lookUpTypeOfDataType typeName = asks (Map.lookup typeName . datatypes) >>= \case
   Just (typeOfDataType, _) -> return typeOfDataType
   Nothing -> asks dataTypeBeingDeclared >>= \case
     Just (name, typeOfDataType) | name == typeName -> return typeOfDataType
-    _ -> err [DS "Data type", DD typeName, DS "not found"]
+    _ -> throwError [i|Data type #{typeName} not found|]
 
 -- Look up the type of a constructor
 lookUpCtor :: TC m => (DataTypeName, CtorName) -> m Type
 lookUpCtor (typeName, ctorName) = do
   (_, ctorDefs) <- lookUpDataType typeName
   case lookup ctorName ctorDefs of
-    Nothing -> err [DS "Constructor", DD ctorName, DS "not found in data type", DD typeName]
+    Nothing -> throwError [i|Constructor #{ctorName} not found in data type #{typeName}|]
     Just ctorType -> return ctorType
 
--- | An error that should be reported to the user
-newtype Err = Err Doc
-
 -- | Augment the error message with addition information
-extendErr :: MonadError Err m => m a -> Doc -> m a
-extendErr ma msg' =
-  ma `catchError` \(Err msg) ->
-    throwError $ Err (msg $$ msg')
-
--- Semigroup instance for combining errors
-instance Semigroup Err where
-  (<>) :: Err -> Err -> Err
-  (Err d1) <> (Err d2) = Err (d1 `mappend` d2)
-
--- Monoid instance for errors with empty as identity
-instance Monoid Err where
-  mempty :: Err
-  mempty = Err mempty
-
--- Helper to display errors using a given display function
-dispErr :: (forall a. Disp a => a -> Doc) -> Err -> Doc
-dispErr _ (Err msg) = msg
-
--- Disp instance for pretty printing errors
-instance Disp Err where
-  disp :: Err -> Doc
-  disp = dispErr disp
-  debugDisp = dispErr debugDisp
+extendErr :: MonadError String m => m a -> Doc -> m a
+extendErr ma msg' = ma `catchError` \msg -> throwError $ msg ++ "\n" ++ render msg'
 
 -- | Throw an error
 err :: TC m => Disp a => [a] -> m b
-err d = throwError $ Err (sep $ map disp d)
+err d = throwError $ render $ sep $ map disp d
