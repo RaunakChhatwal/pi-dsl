@@ -28,7 +28,8 @@ common shared-properties
     containers,
     template-haskell,
     string-interpolate,
-    streaming
+    streaming,
+    extra
 
 library
   import: shared-properties

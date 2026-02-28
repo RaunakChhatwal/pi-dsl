@@ -115,6 +115,8 @@ instance (F.Storable a, F.Storable b, Free a, Free b) => Free (a, b) where
 $(mapM (fmap fromJust . implFree) [''Either, ''Trace])
 -- Generate Free instances for all types reachable from Env
 $(catMaybes <$> (mapM implFree =<< buildDeclOrder ''Env))
+-- Generate Free instance for Entry
+$(pure . fromJust <$> implFree ''Entry)
 
 -- FFI export: create a binding from a name and term
 $(join $ exportFunction "bind"
@@ -136,66 +138,70 @@ eitherToMaybe :: Either String () -> Maybe String
 eitherToMaybe (Left error) = Just error
 eitherToMaybe (Right _) = Nothing
 
--- FFI export: type check a list of entries, returning error and traces
-$(join $ exportFunction "type_check"
+-- FFI export: build an environment from entries without checking
+$(join $ exportFunction "entries_to_env"
     <$> sequence [[t| [Entry] |]]
-    <*> [t| (Maybe String, [Trace]) |]
-    <*> [| return . first eitherToMaybe . traceTcMonad . tcEntries |])
+    <*> [t| Env |]
+    <*> [| return . entriesToEnv |])
+
+-- FFI export: check and elaborate one entry against an existing environment
+$(join $ exportFunction "check_entry"
+    <$> sequence [[t| Env |], [t| Entry |]]
+    <*> [t| (Either String Entry, [Trace]) |]
+    <*> [| \env entry -> return $ traceTcMonad env $ checkEntry entry |])
 
 -- FFI export: infer the type of a term in the given environment
 $(join $ exportFunction "infer_type"
-  <$> sequence [[t| [Entry] |], [t|Term|]]
+  <$> sequence [[t| Env |], [t|Term|]]
   <*> [t| (Either String Type, [Trace]) |]
-  <*> [| \entries term -> return $ traceTcMonad $ withEntries entries $ inferType term |])
+  <*> [| \env term -> return $ traceTcMonad env $ inferType term |])
 
 -- FFI export: check that a term has the expected type in the given environment
 $(join $ exportFunction "check_type"
-  <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]]
+  <$> sequence [[t| Env |], [t|Term|], [t|Type|]]
   <*> [t| (Maybe String, [Trace]) |]
-  <*> [| \entries term type' ->
-    return $ first eitherToMaybe $ traceTcMonad $ withEntries entries $ checkType term type' |])
+  <*> [| \env term type' ->
+    return $ first eitherToMaybe $ traceTcMonad env $ checkType term type' |])
 
 -- FFI export: elaborate a term to produce a well-typed version
 $(join $ exportFunction "elaborate"
-  <$> sequence [[t| [Entry] |], [t|Term|]]
+  <$> sequence [[t| Env |], [t|Term|]]
   <*> [t| (Either String Term, [Trace]) |]
-  <*> [| \entries term -> return $ traceTcMonad $ withEntries entries $ elaborate term |])
+  <*> [| \env term -> return $ traceTcMonad env $ elaborate term |])
 
 -- FFI export: remove implicit applications from an elaborated term
 $(join $ exportFunction "delaborate"
-  <$> sequence [[t| [Entry] |], [t|Term|]]
+  <$> sequence [[t| Env |], [t|Term|]]
   <*> [t| (Either String Term, [Trace]) |]
-  <*> [| \entries term -> return $ traceTcMonad $ withEntries entries $ delaborate term |])
+  <*> [| \env term -> return $ traceTcMonad env $ delaborate term |])
 
 -- FFI export: delaborate a term against an expected type
 $(join $ exportFunction "delaborate_against"
-  <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]]
+  <$> sequence [[t| Env |], [t|Term|], [t|Type|]]
   <*> [t| (Either String Term, [Trace]) |]
-  <*> [| \entries term type' ->
-    return $ traceTcMonad $ withEntries entries $ delaborateAgainst term type' |])
+  <*> [| \env term type' -> return $ traceTcMonad env $ delaborateAgainst term type' |])
 
 -- FFI export: elaborate a term against an expected type
 $(join $ exportFunction "elaborate_against"
-  <$> sequence [[t| [Entry] |], [t|Term|], [t|Type|]]
+  <$> sequence [[t| Env |], [t|Term|], [t|Type|]]
   <*> [t| (Either String Term, [Trace]) |]
-  <*> [| \entries term type' ->
-    return $ traceTcMonad $ withEntries entries $ elaborateAgainst term type' |])
+  <*> [| \env term type' -> return $ traceTcMonad env $ elaborateAgainst term type' |])
 
 -- FFI export: unify two terms
 $(join $ exportFunction "unify"
-  <$> sequence [[t| [Entry] |], [t|Term|], [t|Term|]]
+  <$> sequence [[t| Env |], [t|Term|], [t|Term|]]
   <*> [t| (Maybe String, [Trace]) |]
-  <*> [| \entries term1 term2 ->
-    return $ first eitherToMaybe $ traceTcMonad $ withEntries entries $ unify term1 term2 |])
+  <*> [| \env term1 term2 ->
+    return $ first eitherToMaybe $ traceTcMonad env $ unify term1 term2 |])
 
 -- FFI export: compute weak head normal form of a term
 $(join $ exportFunction "whnf"
-  <$> sequence [[t| [Entry] |], [t|Term|]]
+  <$> sequence [[t| Env |], [t|Term|]]
   <*> [t| (Either String Term, [Trace]) |]
-  <*> [| \entries term -> return $ traceTcMonad $ withEntries entries $ whnf term |])
+  <*> [| \env term -> return $ traceTcMonad env $ whnf term |])
 
 -- FFI export: instantiate metavariables in a term
 $(join $ exportFunction "instantiate_mvars"
-  <$> sequence [[t| [Entry] |], [t|Term|]]
+  <$> sequence [[t| Env |], [t|Term|]]
   <*> [t| (Either String Term, [Trace]) |]
-  <*> [| \entries term -> return $ traceTcMonad $ withEntries entries $ instantiateMVars term |])
+  <*> [| \env term -> return $ traceTcMonad env $ instantiateMVars term |])

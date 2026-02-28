@@ -1,25 +1,28 @@
 module TypeCheck where
 
-import Control.Monad (join, when, unless)
+import Control.Monad (when, unless)
+import Control.Monad.Extra (whenM)
+import Control.Monad.Reader (asks, local)
 import Control.Monad.Trans (lift)
 import Control.Monad.Except (throwError)
+import Data.Map qualified as Map
+import Data.Maybe (isJust)
+import Data.String.Interpolate (i)
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Unbound.Generics.LocallyNameless.Bind qualified as Unbound
 import Unbound.Generics.LocallyNameless.Internal.Fold (toListOf)
-import Data.String.Interpolate (i)
 import Environment
 import Equal
 import PrettyPrint
 import Syntax
 import Inductive
-import Control.Monad.Reader (local)
 
 elaborate :: Term -> TcMonad Term
 elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
   App func arg -> do
-    elaboratedFunc <- elaborate func
-    funcType <- inferType elaboratedFunc
-    go elaboratedFunc funcType where
+    func <- elaborate func
+    funcType <- inferType func
+    go func funcType where
       go func funcType = whnf funcType >>= \case
         Pi Implicit paramType binder -> do
           mvar <- newMVar paramType
@@ -28,15 +31,15 @@ elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
         _ -> err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
 
   Pi binderInfo paramType binder -> do
-    elaboratedParamType <- elaborate paramType
+    paramType <- elaborate paramType
     (paramName, returnType) <- Unbound.unbind binder
-    elaboratedReturnType <- addLocal paramName elaboratedParamType $ elaborate returnType
-    return $ Pi binderInfo elaboratedParamType $ Unbound.bind paramName elaboratedReturnType
+    returnType <- addLocal paramName paramType $ elaborate returnType
+    return $ Pi binderInfo paramType $ Unbound.bind paramName returnType
 
-  Ann inner type' -> do
-    elaboratedType <- elaborate type'
-    elaboratedTerm <- elaborateAgainst inner elaboratedType
-    return $ Ann elaboratedTerm elaboratedType
+  Ann term type' -> do
+    type' <- elaborate type'
+    term <- elaborateAgainst term type'
+    return $ Ann term type'
 
   Lam _ _ -> throwError "Unguided lambda elaboration not implemented"
 
@@ -50,13 +53,13 @@ elaborateAgainst term expectedType = traceM "elaborateAgainst" [ppr term, ppr ex
       Pi piBinderInfo paramType returnTypeBinder -> case (lamBinderInfo, piBinderInfo) of
         (Explicit, Implicit) -> do
           (paramName, returnType) <- Unbound.unbind returnTypeBinder
-          elaboratedBody <- addLocal paramName paramType $ elaborateAgainst term returnType
-          return $ Lam Implicit (Unbound.bind paramName elaboratedBody)
+          term <- addLocal paramName paramType $ elaborateAgainst term returnType
+          return $ Lam Implicit (Unbound.bind paramName term)
 
         _ | lamBinderInfo == piBinderInfo -> do
           (paramName, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder returnTypeBinder
-          elaboratedBody <- addLocal paramName paramType $ elaborateAgainst body returnType
-          return $ Lam lamBinderInfo $ Unbound.bind paramName elaboratedBody
+          body <- addLocal paramName paramType $ elaborateAgainst body returnType
+          return $ Lam lamBinderInfo $ Unbound.bind paramName body
 
         _ -> throwError "Expected explicit parameter but received implicit lambda"
 
@@ -79,7 +82,7 @@ delaborate term = traceM "delaborate" [ppr term] ppr $ case term of
     Pi binderInfo <$> delaborate paramType <*>
       (Unbound.bind paramName <$> addLocal paramName paramType (delaborate returnType))
 
-  Ann inner type' -> Ann <$> delaborateAgainst inner type' <*> delaborate type'
+  Ann term type' -> Ann <$> delaborateAgainst term type' <*> delaborate type'
 
   Lam _ _ -> throwError "Unguided lambda delaboration not implemented"
 
@@ -94,10 +97,10 @@ delaborateAgainst term expectedType = traceM "delaborateAgainst" [ppr term, ppr 
         unless (lamBinderInfo == piBinderInfo) $
           throwError "Lambda binder does not match expected function binder"
         (paramName, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder returnTypeBinder
-        delaboratedBody <- addLocal paramName paramType $ delaborateAgainst body returnType
-        if lamBinderInfo == Implicit && paramName `notElem` toListOf Unbound.fv delaboratedBody
-          then return delaboratedBody
-          else return $ Lam lamBinderInfo (Unbound.bind paramName delaboratedBody)
+        body <- addLocal paramName paramType $ delaborateAgainst body returnType
+        if lamBinderInfo == Implicit && paramName `notElem` toListOf Unbound.fv body
+          then return body
+          else return $ Lam lamBinderInfo $ Unbound.bind paramName body
 
       _ -> err [DS "Lambda expression should have a function type, not", DD expectedType]
 
@@ -133,6 +136,7 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
       _ -> err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
 
   Ann term type' -> do
+    _ <- ensureType type'
     checkType term type'
     return type'
 
@@ -173,65 +177,43 @@ checkClosed (Pi _ paramType (Unbound.B _ returnType)) =
 checkClosed (Ann term type') = checkClosed term >> checkClosed type'
 checkClosed _ = return ()
 
-instantiateMVars :: Term -> TcMonad Term
-instantiateMVars term = case term of
-  Var (Meta id) -> lookUpMVarSolution id >>= \case
-    Just soln -> instantiateMVars soln
-    Nothing -> return term
-  App func arg -> App <$> instantiateMVars func <*> instantiateMVars arg
-  Lam binderInfo binder -> do
-    (paramName, body) <- Unbound.unbind binder
-    Lam binderInfo . Unbound.bind paramName <$> instantiateMVars body
-  Pi binderInfo paramType binder -> do
-    (paramName, returnType) <- Unbound.unbind binder
-    let instantiatedBinder = Unbound.bind paramName <$> instantiateMVars returnType
-    Pi binderInfo <$> instantiateMVars paramType <*> instantiatedBinder
-  Ann inner type' -> Ann <$> instantiateMVars inner <*> instantiateMVars type'
-  _ -> return term
-
--- Type-check a single top-level entry
-addEntry :: Entry -> TcMonad a -> TcMonad (TcMonad a)
-addEntry entry continuation = traceM "tcEntry" [ppr entry] (const "") $ case entry of
+-- Type-check a single top-level entry and return its elaborated, instantiated form
+checkEntry :: Entry -> TcMonad Entry
+checkEntry entry = traceM "tcEntry" [ppr entry] ppr $ case entry of
   Decl var type' term -> do
+    whenM (isJust <$> lookUpDecl var) $ throwError [i|Name conflict when declaring variable #{var}|]
+
     checkClosed type'
     checkClosed term
 
-    elaboratedType <- elaborate type'
-    _ <- ensureType elaboratedType
-    elaboratedTerm <- elaborateAgainst term elaboratedType
-    checkType elaboratedTerm elaboratedType
+    type' <- elaborate type'
+    _ <- ensureType type'
+    term <- elaborateAgainst term type'
+    checkType term type'
 
-    instantiatedType <- instantiateMVars elaboratedType
-    instantiatedTerm <- instantiateMVars elaboratedTerm
-    checkClosed instantiatedType
-    checkClosed instantiatedTerm
+    type' <- instantiateMVars type'
+    term <- instantiateMVars term
+    checkClosed type'
+    checkClosed term
 
-    return $ addDecl var instantiatedType instantiatedTerm continuation
+    return $ Decl var type' term
 
   Data typeName typeSignature ctors -> do
+    whenM (asks $ Map.member typeName . datatypes) $
+      throwError [i|Name conflict when declaring data type #{typeName}|]
+
     checkClosed typeSignature
     mapM_ (checkClosed . snd) ctors
 
-    elaboratedTypeSignature <- elaborate typeSignature
-    let addSelfToEnv env =
-          env { dataTypeBeingDeclared = Just (typeName, elaboratedTypeSignature) }
-    elaboratedCtors <- sequence
+    typeSignature <- elaborate typeSignature
+    let addSelfToEnv env = env { dataTypeBeingDeclared = Just (typeName, typeSignature) }
+    ctors <- sequence
       [(ctorName,) <$> local addSelfToEnv (elaborate ctorType) | (ctorName, ctorType) <- ctors]
-    checkDataTypeDecl typeName elaboratedTypeSignature elaboratedCtors
+    checkDataTypeDecl typeName typeSignature ctors
 
-    instantiatedTypeSignature <- instantiateMVars elaboratedTypeSignature
-    instantiatedCtors <- sequence
-      [(ctorName,) <$> instantiateMVars ctorType | (ctorName, ctorType) <- elaboratedCtors]
-    checkClosed instantiatedTypeSignature
-    mapM_ (checkClosed . snd) instantiatedCtors
+    typeSignature <- instantiateMVars typeSignature
+    ctors <- sequence [(ctorName,) <$> instantiateMVars ctorType | (ctorName, ctorType) <- ctors]
+    checkClosed typeSignature
+    mapM_ (checkClosed . snd) ctors
 
-    return $ addDataType typeName instantiatedTypeSignature instantiatedCtors continuation
-
--- Run a computation with entries added to the environment
-withEntries :: [Entry] -> TcMonad a -> TcMonad a
-withEntries rest monad =
-  foldr (\entry continuation -> join $ addEntry entry continuation) monad rest
-
--- Type-check a list of top-level entries
-tcEntries :: [Entry] -> TcMonad ()
-tcEntries = flip withEntries $ return ()
+    return $ Data typeName typeSignature ctors

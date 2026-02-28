@@ -1,21 +1,24 @@
 module Environment where
 
+import Control.Monad (unless)
 import Control.Monad.Except (MonadError(..), Except, runExcept)
 import Control.Monad.Reader (MonadReader(local), asks, ReaderT(runReaderT))
+import Control.Monad.State (StateT(runStateT))
+import Control.Monad.State.Class qualified as State
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT)
-import Control.Monad.State.Class qualified as State
-import Data.String.Interpolate (i)
-import PrettyPrint
-import Syntax
-import Text.PrettyPrint.HughesPJ (render, sep)
-import Unbound.Generics.LocallyNameless qualified as Unbound
 import Data.Bifunctor (second)
-import Streaming (Stream, Of)
-import Streaming.Prelude qualified as S
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Control.Monad.State (StateT(runStateT))
+import Data.String.Interpolate (i)
+import Streaming (Stream, Of)
+import Streaming.Prelude qualified as S
+import Text.PrettyPrint.HughesPJ (render, sep)
+import Unbound.Generics.LocallyNameless qualified as Unbound
+import Unbound.Generics.LocallyNameless.Bind qualified as Unbound
+import Unbound.Generics.LocallyNameless.Internal.Fold qualified as Unbound
+import PrettyPrint
+import Syntax
 
 -- Trace events for debugging type checking execution
 data Trace = Invoc String [String] | Event String | Result String
@@ -48,20 +51,18 @@ instance TC m => TC (MaybeT m) where
   yield = lift . yield
 
 -- Run the type checking monad and collect traces
-traceTcMonad :: TcMonad a -> (Either String a, [Trace])
-traceTcMonad stream = go stream 0 emptyTcState where
+traceTcMonad :: Env -> TcMonad a -> (Either String a, [Trace])
+traceTcMonad env stream = go stream 0 emptyTcState where
   go stream freshState tcState =
     case runExcept $
         runReaderT
           (runStateT
             (runStateT
-              (Unbound.unFreshMT $ S.next stream) freshState) tcState) emptyEnv of
+              (Unbound.unFreshMT $ S.next stream) freshState) tcState) env of
       Left error -> (Left error, [])
       Right ((Left result, _), _) -> (Right result, [])
       Right ((Right (trace, restStream), newFreshState), newTcState) ->
         second (trace :) (go restStream newFreshState newTcState)
-  emptyEnv = Env Map.empty Map.empty emptyLocalContext Nothing
-  emptyLocalContext = LocalContext Map.empty []
   emptyTcState = TcState 0 Map.empty Map.empty
 
 data TcState = TcState {
@@ -81,6 +82,15 @@ data Env = Env {
   decls :: Map String (Type, Term),
   localCtx :: LocalContext,
   dataTypeBeingDeclared :: Maybe (DataTypeName, Type)
+}
+
+entriesToEnv :: [Entry] -> Env
+entriesToEnv entries = Env {
+  datatypes = Map.fromList
+    [(typeName, (signature, ctors)) | Data typeName signature ctors <- entries],
+  decls = Map.fromList [(var, (type', term)) | Decl var type' term <- entries],
+  localCtx = LocalContext Map.empty [],
+  dataTypeBeingDeclared = Nothing
 }
 
 newMVar :: Type -> TcMonad Term
@@ -105,10 +115,41 @@ lookUpMVarType id = do
 lookUpMVarSolution :: Int -> TcMonad (Maybe Term)
 lookUpMVarSolution id = Map.lookup id . mvarSolutions <$> State.get
 
+instantiateMVars :: Term -> TcMonad Term
+instantiateMVars term = case term of
+  Var (Meta id) -> lookUpMVarSolution id >>= \case
+    Just soln -> instantiateMVars soln
+    Nothing -> return term
+  App func arg -> App <$> instantiateMVars func <*> instantiateMVars arg
+  Lam binderInfo binder -> do
+    (paramName, body) <- Unbound.unbind binder
+    Lam binderInfo . Unbound.bind paramName <$> instantiateMVars body
+  Pi binderInfo paramType binder -> do
+    (paramName, returnType) <- Unbound.unbind binder
+    Pi binderInfo <$> instantiateMVars paramType <*>
+      (Unbound.bind paramName <$> instantiateMVars returnType)
+  Ann term type' -> Ann <$> instantiateMVars term <*> instantiateMVars type'
+  _ -> return term
+
+mvarOccursCheck :: Int -> Term -> Bool
+mvarOccursCheck id term = case term of
+  Var (Meta id2) -> id == id2
+  App func arg -> mvarOccursCheck id func || mvarOccursCheck id arg
+  Lam _ (Unbound.B _ body) -> mvarOccursCheck id body
+  Pi _ paramType (Unbound.B _ returnType) ->
+    mvarOccursCheck id paramType || mvarOccursCheck id returnType
+  Ann term type' -> mvarOccursCheck id term || mvarOccursCheck id type'
+  _ -> False
+
 assignMVar :: Int -> Term -> TcMonad ()
 assignMVar id term = do
+  term <- instantiateMVars term
+  if mvarOccursCheck id term
+    then err [DS [i|"Occurs check failed for ?#{id} in"|], DD term]
+    else unless (null $ Unbound.toListOf @Term @TermName Unbound.fv term) $
+      err [DS "Meta variable solution not closed:", DD term]
   tcState <- State.get
-  State.put $ tcState { mvarSolutions = Map.insert id term (mvarSolutions tcState) }
+  State.put $ tcState { mvarSolutions = Map.insert id term $ mvarSolutions tcState }
 
 -- Look up a global declaration by name
 lookUpDecl :: TC m => String -> m (Maybe (Type, Term))
@@ -170,10 +211,6 @@ lookUpCtor (typeName, ctorName) = do
   case lookup ctorName ctorDefs of
     Nothing -> throwError [i|Constructor #{ctorName} not found in data type #{typeName}|]
     Just ctorType -> return ctorType
-
--- | Augment the error message with addition information
-extendErr :: MonadError String m => m a -> Doc -> m a
-extendErr ma msg' = ma `catchError` \msg -> throwError $ msg ++ "\n" ++ render msg'
 
 -- | Throw an error
 err :: TC m => Disp a => [a] -> m b

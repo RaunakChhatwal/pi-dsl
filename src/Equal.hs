@@ -8,24 +8,10 @@ import Data.Foldable (foldrM)
 import Data.List (nub)
 import Data.String.Interpolate (i)
 import Unbound.Generics.LocallyNameless qualified as Unbound
-import Unbound.Generics.LocallyNameless.Internal.Fold qualified as Unbound
 import Environment
 import Inductive
 import PrettyPrint
 import Syntax
-
-mvarOccursCheck :: Int -> Term -> TcMonad Bool
-mvarOccursCheck id term = case term of
-  Var (Meta id2) -> return $ id == id2
-  App func arg -> (||) <$> mvarOccursCheck id func <*> mvarOccursCheck id arg
-  Lam _ binder -> do
-    (_, body) <- Unbound.unbind binder
-    mvarOccursCheck id body
-  Pi _ paramType binder -> do
-    (_, returnType) <- Unbound.unbind binder
-    (||) <$> mvarOccursCheck id paramType <*> mvarOccursCheck id returnType
-  Ann inner type' -> (||) <$> mvarOccursCheck id inner <*> mvarOccursCheck id type'
-  _ -> return False
 
 millerPatternCheck :: Term -> TcMonad (Maybe (Int, [TermName]))
 millerPatternCheck term = case unfoldApps term of
@@ -41,13 +27,7 @@ millerPatternCheck term = case unfoldApps term of
 solveMVar :: Int -> [TermName] -> Term -> TcMonad ()
 solveMVar id args term = lookUpMVarSolution id >>= \case
   Just soln -> unify (foldl App soln $ map lVar args) term
-  Nothing -> mvarOccursCheck id term >>= \case
-    True -> err [DS [i|"Occurs check failed for ?#{id} in"|], DD term]
-    False -> do
-      let soln = foldr (\arg body -> Lam Explicit (Unbound.bind arg body)) term args
-      unless (null $ Unbound.toListOf @Term @TermName Unbound.fv soln) $
-        err [DS "Meta variable solution not closed:", DD soln]
-      assignMVar id soln
+  Nothing -> assignMVar id $ foldr (\arg body -> Lam Explicit $ Unbound.bind arg body) term args
 
 unify :: Term -> Term -> TcMonad ()
 unify term1 term2 = traceM "unify" [ppr term1, ppr term2] (const "") $ do

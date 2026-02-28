@@ -325,42 +325,46 @@ set_export_signature("ppr_term", [Term], String)
 def ppr_term(term: Term) -> String:
     return call_export("ppr_term", [term])
 
-set_export_signature("type_check", [List[Entry]], Tuple[Maybe[String], List[Trace]])
-def type_check(entries: List[Entry]) -> Tuple[Maybe[String], List[Trace]]:
-    return call_export("type_check", [entries])
+set_export_signature("entries_to_env", [List[Entry]], Env)
+def entries_to_env(entries: List[Entry]) -> Env:
+    return call_export("entries_to_env", [entries])
 
-set_export_signature("infer_type", [List[Entry], Term], Tuple[Either[String, Type], List[Trace]])
-def infer_type(entries: List[Entry], term: Term) -> Tuple[Either[String, Type], List[Trace]]:
-    return call_export("infer_type", [entries, term])
+set_export_signature("check_entry", [Env, Entry], Tuple[Either[String, Entry], List[Trace]])
+def check_entry(env: Env, entry: Entry) -> Tuple[Either[String, Entry], List[Trace]]:
+    return call_export("check_entry", [env, entry])
 
-set_export_signature("check_type", [List[Entry], Term, Type], Tuple[Maybe[String], List[Trace]])
-def check_type(entries: List[Entry], term: Term, type: Type) -> Tuple[Maybe[String], List[Trace]]:
-    return call_export("check_type", [entries, term, type])
+set_export_signature("infer_type", [Env, Term], Tuple[Either[String, Type], List[Trace]])
+def infer_type(env: Env, term: Term) -> Tuple[Either[String, Type], List[Trace]]:
+    return call_export("infer_type", [env, term])
 
-set_export_signature("elaborate", [List[Entry], Term], Tuple[Either[String, Term], List[Trace]])
-def elaborate(entries: List[Entry], term: Term) -> Tuple[Either[String, Term], List[Trace]]:
-    return call_export("elaborate", [entries, term])
+set_export_signature("check_type", [Env, Term, Type], Tuple[Maybe[String], List[Trace]])
+def check_type(env: Env, term: Term, type: Type) -> Tuple[Maybe[String], List[Trace]]:
+    return call_export("check_type", [env, term, type])
 
-set_export_signature("delaborate", [List[Entry], Term], Tuple[Either[String, Term], List[Trace]])
-def delaborate(entries: List[Entry], term: Term) -> Tuple[Either[String, Term], List[Trace]]:
-    return call_export("delaborate", [entries, term])
+set_export_signature("elaborate", [Env, Term], Tuple[Either[String, Term], List[Trace]])
+def elaborate(env: Env, term: Term) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("elaborate", [env, term])
 
-set_export_signature("delaborate_against", [List[Entry], Term, Type], Tuple[Either[String, Term], List[Trace]])
-def delaborate_against(entries: List[Entry], term: Term, type: Type) -> Tuple[Either[String, Term], List[Trace]]:
-    return call_export("delaborate_against", [entries, term, type])
+set_export_signature("delaborate", [Env, Term], Tuple[Either[String, Term], List[Trace]])
+def delaborate(env: Env, term: Term) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("delaborate", [env, term])
 
-set_export_signature("elaborate_against", [List[Entry], Term, Type], Tuple[Either[String, Term], List[Trace]])
-def elaborate_against(entries: List[Entry], term: Term, type: Type) -> Tuple[Either[String, Term], List[Trace]]:
-    return call_export("elaborate_against", [entries, term, type])
+set_export_signature("delaborate_against", [Env, Term, Type], Tuple[Either[String, Term], List[Trace]])
+def delaborate_against(env: Env, term: Term, type: Type) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("delaborate_against", [env, term, type])
 
-set_export_signature("unify", [List[Entry], Term, Term], Tuple[Maybe[String], List[Trace]])
-def unify(entries: List[Entry], term1: Term, term2: Term) -> Tuple[Maybe[String], List[Trace]]:
-    return call_export("unify", [entries, term1, term2])
+set_export_signature("elaborate_against", [Env, Term, Type], Tuple[Either[String, Term], List[Trace]])
+def elaborate_against(env: Env, term: Term, type: Type) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("elaborate_against", [env, term, type])
 
-set_export_signature("whnf", [List[Entry], Term], Tuple[Either[String, Term], List[Trace]])
-def whnf(entries: List[Entry], term: Term) -> Tuple[Either[String, Term], List[Trace]]:
-    return call_export("whnf", [entries, term])
+set_export_signature("unify", [Env, Term, Term], Tuple[Maybe[String], List[Trace]])
+def unify(env: Env, term1: Term, term2: Term) -> Tuple[Maybe[String], List[Trace]]:
+    return call_export("unify", [env, term1, term2])
 
-set_export_signature("instantiate_mvars", [List[Entry], Term], Tuple[Either[String, Term], List[Trace]])
-def instantiate_mvars(entries: List[Entry], term: Term) -> Tuple[Either[String, Term], List[Trace]]:
-    return call_export("instantiate_mvars", [entries, term])
+set_export_signature("whnf", [Env, Term], Tuple[Either[String, Term], List[Trace]])
+def whnf(env: Env, term: Term) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("whnf", [env, term])
+
+set_export_signature("instantiate_mvars", [Env, Term], Tuple[Either[String, Term], List[Trace]])
+def instantiate_mvars(env: Env, term: Term) -> Tuple[Either[String, Term], List[Trace]]:
+    return call_export("instantiate_mvars", [env, term])
