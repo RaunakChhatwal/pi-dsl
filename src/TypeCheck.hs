@@ -199,7 +199,7 @@ checkEntry entry = traceM "tcEntry" [ppr entry] ppr $ case entry of
     return $ Decl var type' term
 
   Data typeName typeSignature ctors -> do
-    whenM (asks $ Map.member typeName . datatypes) $
+    whenM (asks (Map.member typeName . (.datatypes))) $
       throwError [i|Name conflict when declaring data type #{typeName}|]
 
     checkClosed typeSignature

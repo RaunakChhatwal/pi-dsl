@@ -96,24 +96,24 @@ entriesToEnv entries = Env {
 newMVar :: Type -> TcMonad Term
 newMVar type' = do
   tcState <- State.get
-  let id = mvarCounter tcState
-  ctx <- asks (reverse . reverseOrderedLocals . localCtx)
+  let id = tcState.mvarCounter
+  ctx <- asks $ reverse . (.localCtx.reverseOrderedLocals)
   let mvarType = foldr (\(var, type') acc -> Pi Explicit type' (Unbound.bind var acc)) type' ctx
   State.put $ tcState {
     mvarCounter = id + 1,
-    mvarTypes = Map.insert id mvarType (mvarTypes tcState)
+    mvarTypes = Map.insert id mvarType tcState.mvarTypes
   }
   return $ foldl App (Var (Meta id)) (map (lVar . fst) ctx)
 
 lookUpMVarType :: Int -> TcMonad Type
 lookUpMVarType id = do
   tcState <- State.get
-  case Map.lookup id (mvarTypes tcState) of
+  case Map.lookup id tcState.mvarTypes of
     Just type' -> return type'
     Nothing -> throwError [i|Meta #{id} not found|]
 
 lookUpMVarSolution :: Int -> TcMonad (Maybe Term)
-lookUpMVarSolution id = Map.lookup id . mvarSolutions <$> State.get
+lookUpMVarSolution id = Map.lookup id . (.mvarSolutions) <$> State.get
 
 instantiateMVars :: Term -> TcMonad Term
 instantiateMVars term = case term of
@@ -149,18 +149,18 @@ assignMVar id term = do
     else unless (null $ Unbound.toListOf @Term @TermName Unbound.fv term) $
       err [DS "Meta variable solution not closed:", DD term]
   tcState <- State.get
-  State.put $ tcState { mvarSolutions = Map.insert id term $ mvarSolutions tcState }
+  State.put $ tcState { mvarSolutions = Map.insert id term tcState.mvarSolutions }
 
 -- Look up a global declaration by name
 lookUpDecl :: TC m => String -> m (Maybe (Type, Term))
-lookUpDecl var = asks (Map.lookup var . decls)
+lookUpDecl var = asks $ Map.lookup var . (.decls)
 
 -- Look up the type of a variable
 lookUpType :: Var -> TcMonad Type
-lookUpType (Local name) = asks (Map.lookup name . locals . localCtx) >>= \case
+lookUpType (Local name) = asks (Map.lookup name . (.localCtx.locals)) >>= \case
   Just type' -> return type'
   Nothing -> throwError [i|Local variable #{ppr name} not found|]
-lookUpType (Global name) = asks (Map.lookup name . decls) >>= \case
+lookUpType (Global name) = asks (Map.lookup name . (.decls)) >>= \case
   Just (type', _) -> return type'
   Nothing -> throwError [i|Global variable #{name} not found|]
 lookUpType (Meta id) = lookUpMVarType id
@@ -168,7 +168,7 @@ lookUpType (Meta id) = lookUpMVarType id
 -- Add a local variable to the environment
 addLocal :: TermName -> Type -> TcMonad a -> TcMonad a
 addLocal var type' monad = do
-  LocalContext map list <- asks localCtx
+  LocalContext map list <- asks (.localCtx)
   newLocalContext <- case Map.lookup var map of
     Just _ -> throwError [i|Attempted to add local #{ppr var} when already exists|]
     Nothing -> return $ LocalContext (Map.insert var type' map) ((var, type') : list)
@@ -176,31 +176,30 @@ addLocal var type' monad = do
 
 -- Add a data type definition to the environment
 addDataType :: DataTypeName -> Type -> [(CtorName, Type)] -> TcMonad a -> TcMonad a
-addDataType name signature ctors monad = asks (Map.lookup name . datatypes) >>= \case
+addDataType name signature ctors monad = asks (Map.lookup name . (.datatypes)) >>= \case
   Nothing -> flip local monad $
-    \env@(Env datatypes _ _ _) -> env { datatypes = Map.insert name (signature, ctors) datatypes }
+    \env -> env { datatypes = Map.insert name (signature, ctors) env.datatypes }
   Just _ -> throwError [i|Name conflict when declaring data type #{name}|]
 
 -- Add a global declaration to the environment
 addDecl :: String -> Type -> Term -> TcMonad a -> TcMonad a
-addDecl var type' def monad = asks (Map.lookup var . decls) >>= \case
-  Nothing -> flip local monad $
-    \env@(Env _ decls _ _) -> env { decls = Map.insert var (type', def) decls }
+addDecl var type' def monad = asks (Map.lookup var . (.decls)) >>= \case
+  Nothing -> flip local monad $ \env -> env { decls = Map.insert var (type', def) env.decls }
   Just _ -> throwError [i|Name conflict when declaring variable #{var}|]
 
 -- Look up a data type definition by name
 lookUpDataType :: TC m => DataTypeName -> m (Type, [(CtorName, Type)])
-lookUpDataType typeName = asks (Map.lookup typeName . datatypes) >>= \case
+lookUpDataType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
   Just dataTypeDef -> return dataTypeDef
-  Nothing -> asks dataTypeBeingDeclared >>= \case
+  Nothing -> asks (.dataTypeBeingDeclared) >>= \case
     Just _ -> throwError [i|Definition of data type #{typeName} not found|]
     Nothing -> throwError [i|Data type #{typeName} not found|]
 
 -- Look up the type signature of a data type
 lookUpTypeOfDataType :: DataTypeName -> TcMonad Type
-lookUpTypeOfDataType typeName = asks (Map.lookup typeName . datatypes) >>= \case
+lookUpTypeOfDataType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
   Just (typeOfDataType, _) -> return typeOfDataType
-  Nothing -> asks dataTypeBeingDeclared >>= \case
+  Nothing -> asks (.dataTypeBeingDeclared) >>= \case
     Just (name, typeOfDataType) | name == typeName -> return typeOfDataType
     _ -> throwError [i|Data type #{typeName} not found|]
 

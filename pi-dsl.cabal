@@ -11,11 +11,15 @@ common shared-properties
     DefaultSignatures
     DeriveAnyClass
     DerivingStrategies
+    DuplicateRecordFields
     QuasiQuotes
     TemplateHaskell
     AllowAmbiguousTypes
     TypeApplications
     LambdaCase
+    NamedFieldPuns
+    NoFieldSelectors
+    OverloadedRecordDot
     ParallelListComp
 
   ghc-options: -Wall -Wno-name-shadowing -Wno-orphans -fno-ignore-asserts

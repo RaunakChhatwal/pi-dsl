@@ -258,21 +258,21 @@ instance Display Term where
   display (Sort level) = return $ PP.text ("Sort" ++ show level)
   display (Var var) = display var
   display a@(Lam _ _) = do
-    n <- ask prec
+    n <- asks (.prec)
     (binds, body) <- withPrec levelLam $ gatherBinders a
     return $ parens (levelLam < n) $ PP.hang (PP.text "\\" PP.<> PP.hsep binds PP.<> PP.text ".") 2 body
   display app@(App _ _) = do
-    n <- ask prec
+    n <- asks (.prec)
     let (func, args) = unfoldApps app
     df <- withPrec levelApp (display func)
     dargs <- mapM (withPrec (levelApp+1) . display) args
     return $ parens (levelApp < n) $ PP.hang df 2 (PP.sep dargs)
   display piType@(Pi {}) = do
-    precision <- ask prec
+    precision <- asks (.prec)
     let arrow = PP.space <> PP.text "->"
     parens (levelArrow < precision) . PP.sep . PP.punctuate arrow <$> piDocs piType
   display (Ann a b) = do
-    sa <- ask showAnnots
+    sa <- asks (.showAnnots)
     if sa then do
       da <- withPrec 0 (display a)
       db <- withPrec 0 (display b)
@@ -299,6 +299,6 @@ instance Unbound.LFresh ((->) DispInfo) where
     let s = Unbound.name2String nm
     di <- ask
     return $ fromJust $
-      find (\x -> Unbound.AnyName x `S.notMember` dispAvoid di) (map (Unbound.makeName s) [0 ..])
-  getAvoids = asks dispAvoid
-  avoid names = local upd where upd di = di { dispAvoid = S.fromList names `S.union` dispAvoid di }
+      find (\x -> Unbound.AnyName x `S.notMember` di.dispAvoid) (map (Unbound.makeName s) [0 ..])
+  getAvoids = asks (.dispAvoid)
+  avoid names = local upd where upd di = di { dispAvoid = S.fromList names `S.union` di.dispAvoid }
