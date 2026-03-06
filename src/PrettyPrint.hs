@@ -129,10 +129,11 @@ instance Display Entry where
     pure $ PP.hang (PP.text "data" <+> dn <+> PP.text ":" <+> dp <+> PP.text "where") 2 (PP.vcat dc)
 
 
-instance Display Var where
-  display (Local name) = display name
-  display (Global name) = display name
-  display (Meta i) = display @String ("?" ++ show i)
+instance Display Const where
+  display (GVar name) = display name
+  display (DataType typeName) = display typeName
+  display (Ctor typeName ctorName) = display @String [i|#{typeName}.#{ctorName}|]
+  display (Rec typeName) = display @String [i|#{typeName}.rec|]
 
 -------------------------------------------------------------------------
 
@@ -256,7 +257,9 @@ piDocs returnType = pure <$> display returnType
 instance Display Term where
   display (Sort Zero) = return $ PP.text "Set"
   display (Sort level) = return $ PP.text ("Sort" ++ show level)
-  display (Var var) = display var
+  display (LVar name) = display name
+  display (MVar i) = display @String ("?" ++ show i)
+  display (Const const') = display const'
   display a@(Lam _ _) = do
     n <- asks (.prec)
     (binds, body) <- withPrec levelLam $ gatherBinders a
@@ -278,9 +281,6 @@ instance Display Term where
       db <- withPrec 0 (display b)
       return $ PP.parens (da <+> PP.text ":" <+> db)
       else display a
-  display (DataType typeName) = display typeName
-  display (Ctor typeName ctorName) = display @String [i|#{typeName}.#{ctorName}|]
-  display (Rec typeName) = display @String [i|#{typeName}.rec|]
 
 gatherBinders :: Term -> DispInfo -> ([Doc], Doc)
 gatherBinders (Lam _ b) =

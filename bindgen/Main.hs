@@ -20,7 +20,7 @@ main = putStrLn $(State.evalStateT (do
   mapM_ (addBinding . bindingFromName) $ [''Either, ''Trace] ++ declOrder ++ [''Entry]
 
   addBinding $ functionBinding "bind" ["var", "body"]
-    <$> sequence [[t| TermName |], [t| Term |]] <*> [t|Unbound.Bind TermName Term|]
+    <$> sequence [[t| TermName |], [t| Term |]] <*> [t| Unbound.Bind TermName Term |]
 
   addBinding $ functionBinding "unbind" ["binding"]
     <$> sequence [[t| Unbound.Bind TermName Term |]] <*> [t| (TermName, Term) |]

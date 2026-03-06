@@ -28,15 +28,25 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
                 level_binding = level_binding.get_succ()
             return Sort(level)
 
-        case bindings.Term.KIND_VAR:
-            var_binding = binding.get_var()
-            match var_binding.kind:
-                case bindings.Var.KIND_LOCAL:
-                    return Var.from_binding(var_binding.get_local())
-                case bindings.Var.KIND_GLOBAL:
-                    return Global(str(var_binding.get_global()))
-                case bindings.Var.KIND_META:
-                    raise NotImplementedError
+        case bindings.Term.KIND_L_VAR:
+            return Var.from_binding(binding.get_l_var())
+
+        case bindings.Term.KIND_M_VAR:
+            raise NotImplementedError
+
+        case bindings.Term.KIND_CONST:
+            const_binding = binding.get_const()
+            match const_binding.kind:
+                case bindings.Const.KIND_G_VAR:
+                    return Global(str(const_binding.get_g_var()))
+                case bindings.Const.KIND_DATA_TYPE:
+                    return env.datatypes[str(const_binding.get_data_type())]
+                case bindings.Const.KIND_CTOR:
+                    type_name, ctor_name = const_binding.get_ctor()
+                    data_type = env.datatypes[str(type_name)]
+                    return [ctor for ctor in data_type.ctors if ctor.name == str(ctor_name)][0]
+                case bindings.Const.KIND_REC:
+                    return Rec(env.datatypes[str(const_binding.get_rec())])
 
         case bindings.Term.KIND_LAM:
             binder_info, binder = binding.get_lam()
@@ -62,17 +72,6 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
         case bindings.Term.KIND_ANN:
             term, hint = binding.get_ann()
             return Ann(binding_to_term(term, env), binding_to_term(hint, env))
-
-        case bindings.Term.KIND_DATA_TYPE:
-            return env.datatypes[str(binding.get_data_type())]
-
-        case bindings.Term.KIND_CTOR:
-            type_name, ctor_name = binding.get_ctor()
-            data_type = env.datatypes[str(type_name)]
-            return [ctor for ctor in data_type.ctors if ctor.name == str(ctor_name)][0]
-
-        case bindings.Term.KIND_REC:
-            return Rec(env.datatypes[str(binding.get_rec())])
 
 # Exception raised when type checking fails, includes error message and trace trees for debugging
 class PiDslError(Exception):

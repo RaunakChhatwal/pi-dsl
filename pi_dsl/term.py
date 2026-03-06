@@ -74,7 +74,7 @@ class Var(Term):
 
     # Convert variable to Haskell binding as a local variable
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_var(bindings.Var.init_local(self.name_binding()))
+        return bindings.Term.init_l_var(self.name_binding())
 
     # Create a Haskell Name binding from this variable
     def name_binding(self) -> TermName:
@@ -136,7 +136,8 @@ class Ctor(Term):
 
     # Convert constructor to Haskell binding
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_ctor(String(self.datatype.name), String(self.name))
+        return bindings.Term.init_const(
+            bindings.Const.init_ctor(String(self.datatype.name), String(self.name)))
 
 # Inductive datatype with a name, signature, and list of constructors
 @dataclass
@@ -147,7 +148,7 @@ class DataType(Term):
 
     # Convert datatype reference to Haskell binding
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_data_type(String(self.name))
+        return bindings.Term.init_const(bindings.Const.init_data_type(String(self.name)))
 
     # Convert datatype definition to a Haskell Entry binding
     def entry_binding(self) -> Entry:
@@ -163,7 +164,7 @@ class Global(Term):
 
     # Convert global reference to Haskell binding
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_var(bindings.Var.init_global(String(self.name)))
+        return bindings.Term.init_const(bindings.Const.init_g_var(String(self.name)))
 
 # Lambda abstraction with one or more bound variables
 @dataclass
@@ -217,7 +218,7 @@ class Rec(Term):
 
     # Convert recursor to Haskell binding
     def binding(self) -> bindings.Term:
-        return bindings.Term.init_rec(String(self.datatype.name))
+        return bindings.Term.init_const(bindings.Const.init_rec(String(self.datatype.name)))
 
 # Sort: universe level (Set = Sort(0), Set1 = Sort(1), etc.)
 @dataclass

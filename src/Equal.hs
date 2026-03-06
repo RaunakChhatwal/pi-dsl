@@ -15,8 +15,8 @@ import Syntax
 
 millerPatternCheck :: Term -> TcMonad (Maybe (Int, [TermName]))
 millerPatternCheck term = case unfoldApps term of
-  (Var (Meta id), args) -> return $ do
-    let prependIfLocal (Var (Local name)) rest = return $ name : rest
+  (MVar id, args) -> return $ do
+    let prependIfLocal (LVar name) rest = return $ name : rest
         prependIfLocal _ _ = Nothing
     localArgs <- foldrM prependIfLocal [] args
     unless (length localArgs == length (nub localArgs)) Nothing
@@ -26,7 +26,7 @@ millerPatternCheck term = case unfoldApps term of
 -- Solve a metavariable application ?m x1 ... xn
 solveMVar :: Int -> [TermName] -> Term -> TcMonad ()
 solveMVar id args term = lookUpMVarSolution id >>= \case
-  Just soln -> unify (foldl App soln $ map lVar args) term
+  Just soln -> unify (foldl App soln $ map LVar args) term
   Nothing -> assignMVar id $ foldr (\arg body -> Lam Explicit $ Unbound.bind arg body) term args
 
 unify :: Term -> Term -> TcMonad ()
@@ -35,7 +35,7 @@ unify term1 term2 = traceM "unify" [ppr term1, ppr term2] (const "") $ do
   term2 <- whnf term2
   (,) <$> millerPatternCheck term1 <*> millerPatternCheck term2 >>= \case
     (Just (id1, args1), Just (id2, args2)) | id1 == id2 && length args1 == length args2 ->
-      zipWithM_ unify (map lVar args1) (map lVar args2)
+      zipWithM_ unify (map LVar args1) (map LVar args2)
     (Just (id, args), _) -> solveMVar id args term2
     (_, Just (id, args)) -> solveMVar id args term1
 
@@ -60,11 +60,11 @@ unify term1 term2 = traceM "unify" [ppr term1, ppr term2] (const "") $ do
 -- Convert a term to its weak-head normal form, only accepts well typed terms
 whnf :: Term -> TcMonad Term
 whnf term = traceM "whnf" [ppr term] ppr $ case term of
-  Var (Global var) -> lookUpDecl var >>= \case
+  Const (GVar var) -> lookUpDecl var >>= \case
     Just (_, def) -> whnf def
     Nothing -> throwError [i|Global variable #{var} not found|]
 
-  Var (Meta id) -> lookUpMVarSolution id >>= \case
+  MVar id -> lookUpMVarSolution id >>= \case
     Just soln -> whnf soln
     Nothing -> return term
 
@@ -74,7 +74,7 @@ whnf term = traceM "whnf" [ppr term] ppr $ case term of
     case funcNF of
       Lam _ binder ->
         whnf $ foldl App (Unbound.instantiate binder [arg]) rest where (arg : rest) = args
-      Rec typeName -> runMaybeT (reduceRecursor typeName args) >>= \case
+      Const (Rec typeName) -> runMaybeT (reduceRecursor typeName args) >>= \case
         Nothing -> return $ foldl App funcNF args
         Just reduced -> whnf reduced
       _ | Unbound.aeq func funcNF -> return term

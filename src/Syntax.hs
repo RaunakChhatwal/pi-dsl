@@ -33,13 +33,12 @@ levelToInt (Succ level) = 1 + levelToInt level
 instance Show Level where
   show = show . levelToInt
 
--- Variables (local binders or global names)
-data Var = Local TermName | Global String | Meta Int
+data Const
+  = GVar String
+  | DataType DataTypeName
+  | Ctor DataTypeName CtorName
+  | Rec DataTypeName
   deriving (Show, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
-
--- Build a local variable term
-lVar :: TermName -> Term
-lVar = Var . Local
 
 data BinderInfo = Explicit | Implicit
   deriving (Show, Eq, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
@@ -47,14 +46,13 @@ data BinderInfo = Explicit | Implicit
 -- pi-dsl abstract syntax tree
 data Term
   = Sort Level
-  | Var Var
+  | LVar TermName
+  | MVar Int
+  | Const Const
   | Lam BinderInfo (Unbound.Bind TermName Term)
   | App Term Term
   | Pi BinderInfo Type (Unbound.Bind TermName Type)
   | Ann Term Type
-  | DataType DataTypeName
-  | Ctor DataTypeName CtorName
-  | Rec DataTypeName -- recursors
   deriving (Show, Generic)
 
 -- Data type names are represented as strings
@@ -80,5 +78,5 @@ instance Unbound.Alpha Term where
 
 -- Substitution instance for Term
 instance Unbound.Subst Term Term where
-  isvar (Var (Local name)) = Just (Unbound.SubstName name)
+  isvar (LVar name) = Just $ Unbound.SubstName name
   isvar _ = Nothing

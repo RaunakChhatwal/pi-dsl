@@ -2,8 +2,7 @@ import inspect
 from typing import Any, Callable
 from . import bindings
 from .env import Env
-from .term import Ann, App, Ctor, DataType, Global, Hint, IParam, IVar, Lam, Param, Pi, Rec, Set, \
-    Sort, Term, Type, Var
+from .term import *
 
 # Singleton stub representing the self-referential type in datatype definitions
 class SelfSingleton(Term):

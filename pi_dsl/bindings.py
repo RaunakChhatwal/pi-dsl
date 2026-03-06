@@ -106,36 +106,45 @@ class Name[T1](TaggedUnion):
         assert self.kind == self.KIND_BN
         return self.get_field(Tuple[Int, Int]).get()
 
-class Var(TaggedUnion):
-    kind: Literal[0, 1, 2]
+class Const(TaggedUnion):
+    kind: Literal[0, 1, 2, 3]
     
-    KIND_LOCAL = 0
-    KIND_GLOBAL = 1
-    KIND_META = 2
-    
-    @classmethod
-    def init_local(cls, value: TermName):
-        return cls(cls.KIND_LOCAL, value)
-    
-    def get_local(self) -> TermName:
-        assert self.kind == self.KIND_LOCAL
-        return self.get_field(TermName)
+    KIND_G_VAR = 0
+    KIND_DATA_TYPE = 1
+    KIND_CTOR = 2
+    KIND_REC = 3
     
     @classmethod
-    def init_global(cls, value: String):
-        return cls(cls.KIND_GLOBAL, value)
+    def init_g_var(cls, value: String):
+        return cls(cls.KIND_G_VAR, value)
     
-    def get_global(self) -> String:
-        assert self.kind == self.KIND_GLOBAL
+    def get_g_var(self) -> String:
+        assert self.kind == self.KIND_G_VAR
         return self.get_field(String)
     
     @classmethod
-    def init_meta(cls, value: Int):
-        return cls(cls.KIND_META, value)
+    def init_data_type(cls, value: DataTypeName):
+        return cls(cls.KIND_DATA_TYPE, value)
     
-    def get_meta(self) -> Int:
-        assert self.kind == self.KIND_META
-        return self.get_field(Int)
+    def get_data_type(self) -> DataTypeName:
+        assert self.kind == self.KIND_DATA_TYPE
+        return self.get_field(DataTypeName)
+    
+    @classmethod
+    def init_ctor(cls, *values: *tuple[DataTypeName, CtorName]):
+        return cls(cls.KIND_CTOR, init_tuple(*values))
+    
+    def get_ctor(self) -> tuple[DataTypeName, CtorName]:
+        assert self.kind == self.KIND_CTOR
+        return self.get_field(Tuple[DataTypeName, CtorName]).get()
+    
+    @classmethod
+    def init_rec(cls, value: DataTypeName):
+        return cls(cls.KIND_REC, value)
+    
+    def get_rec(self) -> DataTypeName:
+        assert self.kind == self.KIND_REC
+        return self.get_field(DataTypeName)
 
 class BinderInfo(TaggedUnion):
     kind: Literal[0, 1]
@@ -157,17 +166,16 @@ class Bind[T1, T2](TaggedUnion):
         return self.get_field(Tuple[T1, T2]).get()
 
 class Term(TaggedUnion):
-    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8]
+    kind: Literal[0, 1, 2, 3, 4, 5, 6, 7]
     
     KIND_SORT = 0
-    KIND_VAR = 1
-    KIND_LAM = 2
-    KIND_APP = 3
-    KIND_PI = 4
-    KIND_ANN = 5
-    KIND_DATA_TYPE = 6
-    KIND_CTOR = 7
-    KIND_REC = 8
+    KIND_L_VAR = 1
+    KIND_M_VAR = 2
+    KIND_CONST = 3
+    KIND_LAM = 4
+    KIND_APP = 5
+    KIND_PI = 6
+    KIND_ANN = 7
     
     @classmethod
     def init_sort(cls, value: Level):
@@ -178,12 +186,28 @@ class Term(TaggedUnion):
         return self.get_field(Level)
     
     @classmethod
-    def init_var(cls, value: Var):
-        return cls(cls.KIND_VAR, value)
+    def init_l_var(cls, value: TermName):
+        return cls(cls.KIND_L_VAR, value)
     
-    def get_var(self) -> Var:
-        assert self.kind == self.KIND_VAR
-        return self.get_field(Var)
+    def get_l_var(self) -> TermName:
+        assert self.kind == self.KIND_L_VAR
+        return self.get_field(TermName)
+    
+    @classmethod
+    def init_m_var(cls, value: Int):
+        return cls(cls.KIND_M_VAR, value)
+    
+    def get_m_var(self) -> Int:
+        assert self.kind == self.KIND_M_VAR
+        return self.get_field(Int)
+    
+    @classmethod
+    def init_const(cls, value: Const):
+        return cls(cls.KIND_CONST, value)
+    
+    def get_const(self) -> Const:
+        assert self.kind == self.KIND_CONST
+        return self.get_field(Const)
     
     @classmethod
     def init_lam(cls, *values: *tuple[BinderInfo, Bind[TermName, Term]]):
@@ -216,30 +240,6 @@ class Term(TaggedUnion):
     def get_ann(self) -> tuple[Term, Type]:
         assert self.kind == self.KIND_ANN
         return self.get_field(Tuple[Term, Type]).get()
-    
-    @classmethod
-    def init_data_type(cls, value: DataTypeName):
-        return cls(cls.KIND_DATA_TYPE, value)
-    
-    def get_data_type(self) -> DataTypeName:
-        assert self.kind == self.KIND_DATA_TYPE
-        return self.get_field(DataTypeName)
-    
-    @classmethod
-    def init_ctor(cls, *values: *tuple[DataTypeName, CtorName]):
-        return cls(cls.KIND_CTOR, init_tuple(*values))
-    
-    def get_ctor(self) -> tuple[DataTypeName, CtorName]:
-        assert self.kind == self.KIND_CTOR
-        return self.get_field(Tuple[DataTypeName, CtorName]).get()
-    
-    @classmethod
-    def init_rec(cls, value: DataTypeName):
-        return cls(cls.KIND_REC, value)
-    
-    def get_rec(self) -> DataTypeName:
-        assert self.kind == self.KIND_REC
-        return self.get_field(DataTypeName)
 
 class LocalContext(TaggedUnion):
     kind: Literal[0]

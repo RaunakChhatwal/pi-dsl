@@ -1,6 +1,6 @@
 module TypeCheck where
 
-import Control.Monad (when, unless)
+import Control.Monad (unless, when)
 import Control.Monad.Extra (whenM)
 import Control.Monad.Reader (asks, local)
 import Control.Monad.Trans (lift)
@@ -54,7 +54,7 @@ elaborateAgainst term expectedType = traceM "elaborateAgainst" [ppr term, ppr ex
         (Explicit, Implicit) -> do
           (paramName, returnType) <- Unbound.unbind returnTypeBinder
           term <- addLocal paramName paramType $ elaborateAgainst term returnType
-          return $ Lam Implicit (Unbound.bind paramName term)
+          return $ Lam Implicit $ Unbound.bind paramName term
 
         _ | lamBinderInfo == piBinderInfo -> do
           (paramName, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder returnTypeBinder
@@ -109,13 +109,15 @@ delaborateAgainst term expectedType = traceM "delaborateAgainst" [ppr term, ppr 
 -- Check that a term is a type and return its universe level
 ensureType :: Term -> TcMonad Level
 ensureType term = inferType term >>= whnf >>= \case
-  Sort u -> return u
+  Sort level -> return level
   type' -> err [DS "Expected type but got", DD term, DS "with type", DD type']
 
 -- Infer the type of a term
 inferType :: Term -> TcMonad Type
 inferType term = traceM "inferType" [ppr term] ppr $ case term of
-  Var var -> lookUpType var
+  LVar name -> lookUpLVarType name
+
+  MVar id -> lookUpMVarType id
 
   Sort level -> return $ Sort $ Succ level
 
@@ -140,11 +142,13 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
     checkType term type'
     return type'
 
-  DataType typeName -> lookUpTypeOfDataType typeName
+  Const (GVar name) -> lookUpGVarType name
 
-  Ctor typeName ctorName -> lookUpCtor (typeName, ctorName)
+  Const (DataType typeName) -> lookUpTypeOfDataType typeName
 
-  Rec typeName -> synthesizeRecursorType typeName
+  Const (Ctor typeName ctorName) -> lookUpCtor (typeName, ctorName)
+
+  Const (Rec typeName) -> synthesizeRecursorType typeName
 
 -- Check that a term has the expected type
 checkType :: Term -> Type -> TcMonad ()
@@ -167,9 +171,9 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
 
 -- Verify that a term has no free/meta variables
 checkClosed :: Term -> TcMonad ()
-checkClosed (Var (Local var)) = when (Unbound.isFreeName var) $
+checkClosed (LVar var) = when (Unbound.isFreeName var) $
   throwError [i|Closed check failed: free local #{ppr var}|]
-checkClosed (Var (Meta id)) = throwError [i|Closed check failed: unresolved meta ?#{id}|]
+checkClosed (MVar id) = throwError [i|Closed check failed: unresolved meta ?#{id}|]
 checkClosed (Lam _ (Unbound.B _ body)) = checkClosed body
 checkClosed (App func arg) = checkClosed func >> checkClosed arg
 checkClosed (Pi _ paramType (Unbound.B _ returnType)) =
@@ -179,7 +183,7 @@ checkClosed _ = return ()
 
 -- Type-check a single top-level entry and return its elaborated, instantiated form
 checkEntry :: Entry -> TcMonad Entry
-checkEntry entry = traceM "tcEntry" [ppr entry] ppr $ case entry of
+checkEntry entry = traceM "checkEntry" [ppr entry] ppr $ case entry of
   Decl var type' term -> do
     whenM (isJust <$> lookUpDecl var) $ throwError [i|Name conflict when declaring variable #{var}|]
 
@@ -199,7 +203,7 @@ checkEntry entry = traceM "tcEntry" [ppr entry] ppr $ case entry of
     return $ Decl var type' term
 
   Data typeName typeSignature ctors -> do
-    whenM (asks (Map.member typeName . (.datatypes))) $
+    whenM (asks $ Map.member typeName . (.datatypes)) $
       throwError [i|Name conflict when declaring data type #{typeName}|]
 
     checkClosed typeSignature

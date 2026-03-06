@@ -1,3 +1,5 @@
+{-# LANGUAGE UndecidableInstances #-}
+
 module Environment where
 
 import Control.Monad (unless)
@@ -38,6 +40,9 @@ type TcMonad = Stream (Of Trace) (Unbound.FreshMT (StateT TcState (ReaderT Env (
 instance Unbound.Fresh m => Unbound.Fresh (Stream (Of Trace) m) where
   fresh = lift . Unbound.fresh
 
+instance {-# OVERLAPPABLE #-} Monad m => MonadFail m where
+  fail = error
+
 -- Type checking monad constraint with error handling, environment, and fresh names
 class (MonadError String m, MonadReader Env m, Unbound.Fresh m) => TC m where
   yield :: Trace -> m ()
@@ -54,11 +59,7 @@ instance TC m => TC (MaybeT m) where
 traceTcMonad :: Env -> TcMonad a -> (Either String a, [Trace])
 traceTcMonad env stream = go stream 0 emptyTcState where
   go stream freshState tcState =
-    case runExcept $
-        runReaderT
-          (runStateT
-            (runStateT
-              (Unbound.unFreshMT $ S.next stream) freshState) tcState) env of
+    case runExcept $ runReaderT (runStateT (runStateT (Unbound.unFreshMT $ S.next stream) freshState) tcState) env of
       Left error -> (Left error, [])
       Right ((Left result, _), _) -> (Right result, [])
       Right ((Right (trace, restStream), newFreshState), newTcState) ->
@@ -103,7 +104,7 @@ newMVar type' = do
     mvarCounter = id + 1,
     mvarTypes = Map.insert id mvarType tcState.mvarTypes
   }
-  return $ foldl App (Var (Meta id)) (map (lVar . fst) ctx)
+  return $ foldl App (MVar id) $ map (LVar . fst) ctx
 
 lookUpMVarType :: Int -> TcMonad Type
 lookUpMVarType id = do
@@ -117,7 +118,7 @@ lookUpMVarSolution id = Map.lookup id . (.mvarSolutions) <$> State.get
 
 instantiateMVars :: Term -> TcMonad Term
 instantiateMVars term = case term of
-  Var (Meta id) -> lookUpMVarSolution id >>= \case
+  MVar id -> lookUpMVarSolution id >>= \case
     Just soln -> instantiateMVars soln
     Nothing -> return term
   App func arg -> App <$> instantiateMVars func <*> instantiateMVars arg
@@ -133,7 +134,7 @@ instantiateMVars term = case term of
 
 mvarOccursCheck :: Int -> Term -> Bool
 mvarOccursCheck id term = case term of
-  Var (Meta id2) -> id == id2
+  MVar id2 -> id == id2
   App func arg -> mvarOccursCheck id func || mvarOccursCheck id arg
   Lam _ (Unbound.B _ body) -> mvarOccursCheck id body
   Pi _ paramType (Unbound.B _ returnType) ->
@@ -147,7 +148,7 @@ assignMVar id term = do
   if mvarOccursCheck id term
     then err [DS [i|"Occurs check failed for ?#{id} in"|], DD term]
     else unless (null $ Unbound.toListOf @Term @TermName Unbound.fv term) $
-      err [DS "Meta variable solution not closed:", DD term]
+      err [DS [i|Meta variable solution for ?#{id} not closed:|], DD term]
   tcState <- State.get
   State.put $ tcState { mvarSolutions = Map.insert id term tcState.mvarSolutions }
 
@@ -155,15 +156,15 @@ assignMVar id term = do
 lookUpDecl :: TC m => String -> m (Maybe (Type, Term))
 lookUpDecl var = asks $ Map.lookup var . (.decls)
 
--- Look up the type of a variable
-lookUpType :: Var -> TcMonad Type
-lookUpType (Local name) = asks (Map.lookup name . (.localCtx.locals)) >>= \case
+lookUpLVarType :: TermName -> TcMonad Type
+lookUpLVarType name = asks (Map.lookup name . (.localCtx.locals)) >>= \case
   Just type' -> return type'
   Nothing -> throwError [i|Local variable #{ppr name} not found|]
-lookUpType (Global name) = asks (Map.lookup name . (.decls)) >>= \case
+
+lookUpGVarType :: String -> TcMonad Type
+lookUpGVarType name = asks (Map.lookup name . (.decls)) >>= \case
   Just (type', _) -> return type'
   Nothing -> throwError [i|Global variable #{name} not found|]
-lookUpType (Meta id) = lookUpMVarType id
 
 -- Add a local variable to the environment
 addLocal :: TermName -> Type -> TcMonad a -> TcMonad a
