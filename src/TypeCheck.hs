@@ -142,13 +142,7 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
     checkType term type'
     return type'
 
-  Const (GVar name) -> lookUpGVarType name
-
-  Const (DataType typeName) -> lookUpTypeOfDataType typeName
-
-  Const (Ctor typeName ctorName) -> lookUpCtor (typeName, ctorName)
-
-  Const (Rec typeName) -> synthesizeRecursorType typeName
+  Const constant -> lookUpConstType constant
 
 -- Check that a term has the expected type
 checkType :: Term -> Type -> TcMonad ()
@@ -202,22 +196,24 @@ addEntry entry = traceM "addEntry" [ppr entry] (const "") $ case entry of
 
     addDecl var type' term ask
 
-  Data typeName typeSignature ctors -> do
+  Data typeName signature ctors -> do
     whenM (asks $ Map.member typeName . (.datatypes)) $
       throwError [i|Name conflict when declaring data type #{typeName}|]
 
-    checkClosed typeSignature
+    checkClosed signature
     mapM_ (checkClosed . snd) ctors
 
-    typeSignature <- elaborate typeSignature
-    let addSelfToEnv env = env { dataTypeBeingDeclared = Just (typeName, typeSignature) }
+    signature <- elaborate signature
+    let addSelfToEnv env = env { dataTypeBeingDeclared = Just (typeName, signature) }
     ctors <- sequence
       [(ctorName,) <$> local addSelfToEnv (elaborate ctorType) | (ctorName, ctorType) <- ctors]
-    checkDataTypeDecl typeName typeSignature ctors
+    checkDataTypeDecl typeName signature ctors
 
-    typeSignature <- instantiateMVars typeSignature
+    signature <- instantiateMVars signature
     ctors <- sequence [(ctorName,) <$> instantiateMVars ctorType | (ctorName, ctorType) <- ctors]
-    checkClosed typeSignature
+    recursorType <- synthesizeRecursorType typeName signature ctors
+    checkClosed signature
     mapM_ (checkClosed . snd) ctors
+    checkClosed recursorType
 
-    addDataType typeName typeSignature ctors ask
+    addDataType typeName (DataTypeInfo signature ctors recursorType) ask

@@ -84,17 +84,15 @@ recursorReturnType motive selfName typeName paramNames = whnf >=> \case
     selfApplied = foldl App (Const $ DataType typeName) $ map LVar $ reverse paramNames
 
 -- Synthesize the full type of a recursor for a data type
-synthesizeRecursorType :: DataTypeName -> TcMonad Type
-synthesizeRecursorType typeName = do
-  (signature, ctorDefs) <- lookUpDataType typeName
-
+synthesizeRecursorType :: DataTypeName -> Type -> [(CtorName, Type)] -> TcMonad Type
+synthesizeRecursorType typeName signature ctors = do
   -- Use fresh names to avoid capturing user variables like `motive`/`self`.
   motive <- Unbound.fresh $ Unbound.string2Name "motive"
   selfName <- Unbound.fresh $ Unbound.string2Name "self"
   hole <- Unbound.fresh $ Unbound.string2Name "_"
 
   motiveType <- motiveTypeFromTypeSignature hole typeName [] signature
-  cases <- forM ctorDefs $ \(ctorName, ctorType) ->
+  cases <- forM ctors $ \(ctorName, ctorType) ->
     recursorCaseFromCtor motive hole ctorName typeName (Const $ Ctor typeName ctorName) ctorType
 
   let addMotive = addParam (Explicit, motive, motiveType)
@@ -153,7 +151,9 @@ reduceRecursor :: DataTypeName -> [Term] -> MaybeT TcMonad Term
 reduceRecursor _ [] = empty
 reduceRecursor typeName (motive:args) =
   traceM "reduceRecursor" (typeName : ppr motive : map ppr args) ppr $ do
-    (typeSignature, ctors) <- lookUpDataType typeName
+    dataTypeInfo <- lookUpDataType typeName
+    let typeSignature = dataTypeInfo.signature
+    let ctors = dataTypeInfo.ctors
     (params, _) <- lift $ unfoldPi typeSignature
     let numTypeArgs = length params
     (cases, (scrutinee, extraArgs)) <- splitRecursorArgs (length ctors) numTypeArgs args

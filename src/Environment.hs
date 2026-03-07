@@ -78,8 +78,14 @@ data LocalContext = LocalContext {
   reverseOrderedLocals :: [(TermName, Type)]
 }
 
+data DataTypeInfo = DataTypeInfo {
+  signature :: Type,
+  ctors :: [(CtorName, Type)],
+  recursorType :: Type
+}
+
 data Env = Env {
-  datatypes :: Map DataTypeName (Type, [(CtorName, Type)]),
+  datatypes :: Map DataTypeName DataTypeInfo,
   decls :: Map String (Type, Term),
   localCtx :: LocalContext,
   dataTypeBeingDeclared :: Maybe (DataTypeName, Type)
@@ -157,6 +163,13 @@ lookUpGVarType name = asks (Map.lookup name . (.decls)) >>= \case
   Just (type', _) -> return type'
   Nothing -> throwError [i|Global variable #{name} not found|]
 
+lookUpConstType :: Const -> TcMonad Type
+lookUpConstType = \case
+  GVar name -> lookUpGVarType name
+  DataType typeName -> lookUpTypeOfDataType typeName
+  Ctor typeName ctorName -> lookUpCtorType (typeName, ctorName)
+  Rec typeName -> lookUpRecursorType typeName
+
 -- Add a local variable to the environment
 addLocal :: TermName -> Type -> TcMonad a -> TcMonad a
 addLocal var type' monad = do
@@ -167,10 +180,10 @@ addLocal var type' monad = do
   local (\env -> env { localCtx = newLocalContext }) monad
 
 -- Add a data type definition to the environment
-addDataType :: DataTypeName -> Type -> [(CtorName, Type)] -> TcMonad a -> TcMonad a
-addDataType name signature ctors monad = asks (Map.lookup name . (.datatypes)) >>= \case
+addDataType :: DataTypeName -> DataTypeInfo -> TcMonad a -> TcMonad a
+addDataType name dataTypeInfo monad = asks (Map.lookup name . (.datatypes)) >>= \case
   Nothing -> flip local monad $
-    \env -> env { datatypes = Map.insert name (signature, ctors) env.datatypes }
+    \env -> env { datatypes = Map.insert name dataTypeInfo env.datatypes }
   Just _ -> throwError [i|Name conflict when declaring data type #{name}|]
 
 -- Add a global declaration to the environment
@@ -180,7 +193,7 @@ addDecl var type' def monad = asks (Map.lookup var . (.decls)) >>= \case
   Just _ -> throwError [i|Name conflict when declaring variable #{var}|]
 
 -- Look up a data type definition by name
-lookUpDataType :: TC m => DataTypeName -> m (Type, [(CtorName, Type)])
+lookUpDataType :: TC m => DataTypeName -> m DataTypeInfo
 lookUpDataType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
   Just dataTypeDef -> return dataTypeDef
   Nothing -> asks (.dataTypeBeingDeclared) >>= \case
@@ -190,16 +203,21 @@ lookUpDataType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
 -- Look up the type signature of a data type
 lookUpTypeOfDataType :: DataTypeName -> TcMonad Type
 lookUpTypeOfDataType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
-  Just (typeOfDataType, _) -> return typeOfDataType
+  Just dataTypeInfo -> return dataTypeInfo.signature
   Nothing -> asks (.dataTypeBeingDeclared) >>= \case
     Just (name, typeOfDataType) | name == typeName -> return typeOfDataType
     _ -> throwError [i|Data type #{typeName} not found|]
 
+lookUpRecursorType :: DataTypeName -> TcMonad Type
+lookUpRecursorType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
+  Just dataTypeInfo -> return dataTypeInfo.recursorType
+  Nothing -> throwError [i|Data type #{typeName} not found|]
+
 -- Look up the type of a constructor
-lookUpCtor :: TC m => (DataTypeName, CtorName) -> m Type
-lookUpCtor (typeName, ctorName) = do
-  (_, ctorDefs) <- lookUpDataType typeName
-  case lookup ctorName ctorDefs of
+lookUpCtorType :: TC m => (DataTypeName, CtorName) -> m Type
+lookUpCtorType (typeName, ctorName) = do
+  dataTypeInfo <- lookUpDataType typeName
+  case lookup ctorName dataTypeInfo.ctors of
     Nothing -> throwError [i|Constructor #{ctorName} not found in data type #{typeName}|]
     Just ctorType -> return ctorType
 
