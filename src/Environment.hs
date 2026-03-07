@@ -85,15 +85,6 @@ data Env = Env {
   dataTypeBeingDeclared :: Maybe (DataTypeName, Type)
 }
 
-entriesToEnv :: [Entry] -> Env
-entriesToEnv entries = Env {
-  datatypes = Map.fromList
-    [(typeName, (signature, ctors)) | Data typeName signature ctors <- entries],
-  decls = Map.fromList [(var, (type', term)) | Decl var type' term <- entries],
-  localCtx = LocalContext Map.empty [],
-  dataTypeBeingDeclared = Nothing
-}
-
 newMVar :: Type -> TcMonad Term
 newMVar type' = do
   tcState <- State.get

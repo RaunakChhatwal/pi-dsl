@@ -2,7 +2,7 @@ module TypeCheck where
 
 import Control.Monad (unless, when)
 import Control.Monad.Extra (whenM)
-import Control.Monad.Reader (asks, local)
+import Control.Monad.Reader (asks, local, ask)
 import Control.Monad.Trans (lift)
 import Control.Monad.Except (throwError)
 import Data.Map qualified as Map
@@ -182,8 +182,8 @@ checkClosed (Ann term type') = checkClosed term >> checkClosed type'
 checkClosed _ = return ()
 
 -- Type-check a single top-level entry and return its elaborated, instantiated form
-checkEntry :: Entry -> TcMonad Entry
-checkEntry entry = traceM "checkEntry" [ppr entry] ppr $ case entry of
+addEntry :: Entry -> TcMonad Env
+addEntry entry = traceM "addEntry" [ppr entry] (const "") $ case entry of
   Decl var type' term -> do
     whenM (isJust <$> lookUpDecl var) $ throwError [i|Name conflict when declaring variable #{var}|]
 
@@ -200,7 +200,7 @@ checkEntry entry = traceM "checkEntry" [ppr entry] ppr $ case entry of
     checkClosed type'
     checkClosed term
 
-    return $ Decl var type' term
+    addDecl var type' term ask
 
   Data typeName typeSignature ctors -> do
     whenM (asks $ Map.member typeName . (.datatypes)) $
@@ -220,4 +220,4 @@ checkEntry entry = traceM "checkEntry" [ppr entry] ppr $ case entry of
     checkClosed typeSignature
     mapM_ (checkClosed . snd) ctors
 
-    return $ Data typeName typeSignature ctors
+    addDataType typeName typeSignature ctors ask

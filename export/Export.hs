@@ -122,7 +122,7 @@ $(pure . fromJust <$> implFree ''Entry)
 $(join $ exportFunction "bind"
   <$> sequence [[t|TermName|], [t|Term|]]
   <*> [t|Unbound.Bind TermName Term|]
-  <*> [| \var body -> return (Unbound.bind var body) |])
+  <*> [| \var body -> return $ Unbound.bind var body |])
 
 -- FFI export: destructure a binding into name and term
 $(join $ exportFunction "unbind"
@@ -138,17 +138,11 @@ eitherToMaybe :: Either String () -> Maybe String
 eitherToMaybe (Left error) = Just error
 eitherToMaybe (Right _) = Nothing
 
--- FFI export: build an environment from entries without checking
-$(join $ exportFunction "entries_to_env"
-    <$> sequence [[t| [Entry] |]]
-    <*> [t| Env |]
-    <*> [| return . entriesToEnv |])
-
 -- FFI export: check and elaborate one entry against an existing environment
-$(join $ exportFunction "check_entry"
+$(join $ exportFunction "add_entry"
     <$> sequence [[t| Env |], [t| Entry |]]
-    <*> [t| (Either String Entry, [Trace]) |]
-    <*> [| \env entry -> return $ traceTcMonad env $ checkEntry entry |])
+    <*> [t| (Either String Env, [Trace]) |]
+    <*> [| \env entry -> return $ traceTcMonad env $ addEntry entry |])
 
 -- FFI export: infer the type of a term in the given environment
 $(join $ exportFunction "infer_type"

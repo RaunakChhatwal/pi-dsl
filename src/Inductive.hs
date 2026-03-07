@@ -55,7 +55,7 @@ hypothesisTypeFromCtorParam motive self paramNames args name = whnf >=> \case
 -- Compute the return type of a recursor case from constructor return type
 motiveFromCtorReturnType :: TermName -> Term -> [Term] -> Type -> TcMonad Type
 motiveFromCtorReturnType motive ctor args = whnf >=> \case
-  App f arg -> motiveFromCtorReturnType motive ctor (arg : args) f
+  App func arg -> motiveFromCtorReturnType motive ctor (arg : args) func
   _ -> return $ App (foldl App (LVar motive) args) ctor
 
 -- Build the type of a recursor case from a constructor definition

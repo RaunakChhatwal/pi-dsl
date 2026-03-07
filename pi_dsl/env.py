@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from .base import List, String
+from .base import String
 from . import bindings, tracing
 from .bindings import BinderInfo, Either, Maybe, unbind
 from .term import *
@@ -85,12 +85,20 @@ class Env:
     datatypes: dict[str, DataType]
     decls: dict[str, Decl]
     entries: list[str]
+    binding: bindings.Env
 
     # Initializes environment with optional datatype and declaration entries
     def __init__(self, *entries: DataType | Decl):
         self.datatypes = {}
         self.decls = {}
         self.entries = []
+        self.binding = bindings.Env.init_env(
+            bindings.Map(bindings.Map.KIND_TIP),
+            bindings.Map(bindings.Map.KIND_TIP),
+            bindings.LocalContext.init_local_context(
+                bindings.Map(bindings.Map.KIND_TIP),
+                bindings.List[bindings.Tuple[bindings.TermName, bindings.Type]]()),
+            bindings.Maybe(bindings.Maybe.KIND_NOTHING))
 
         for entry in entries:
             match entry:
@@ -99,43 +107,28 @@ class Env:
                 case Decl():
                     self.declare(entry.var, entry.signature, entry.body)
 
-    def binding(self) -> bindings.Env:
-        entries = [self.get_entry(entry).entry_binding() for entry in self.entries]
-        return bindings.entries_to_env(List[bindings.Entry](*entries))
-
     # Adds a datatype to the environment and type checks incrementally
     def add_datatype(self, datatype: DataType):
         assert datatype.name not in self.entries
-        either, traces = bindings.check_entry(self.binding(), datatype.entry_binding()).get()
+        either, traces = bindings.add_entry(self.binding, datatype.entry_binding()).get()
         if either.kind == Either.KIND_LEFT:
             raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
 
-        name, signature_binding, ctor_bindings = either.get_right().get_data()
-        datatype = DataType(str(name), binding_to_term(signature_binding, self), [])
-
         self.entries.append(datatype.name)
         self.datatypes[datatype.name] = datatype
-
-        for ctor_binding in ctor_bindings.get():
-            ctor_name, ctor_type = ctor_binding.get()
-            datatype.ctors.append(Ctor(str(ctor_name), datatype, binding_to_term(ctor_type, self)))
+        self.binding = either.get_right()
 
     # Adds a declaration with signature and body to the environment, type checks incrementally
     def declare(self, var: Global, hint: Type, defn: Term):
         assert var.name not in self.entries
         either, traces = \
-            bindings.check_entry(self.binding(), Decl(var, hint, defn).entry_binding()).get()
+            bindings.add_entry(self.binding, Decl(var, hint, defn).entry_binding()).get()
         if either.kind == Either.KIND_LEFT:
             raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
 
-        name, type_binding, body_binding = either.get_right().get_decl()
-        decl = Decl(
-            Global(str(name)),
-            binding_to_term(type_binding, self),
-            binding_to_term(body_binding, self))
-
         self.entries.append(var.name)
-        self.decls[var.name] = decl
+        self.decls[var.name] = Decl(var, hint, defn)
+        self.binding = either.get_right()
 
     # Retrieves a datatype or declaration entry by name
     def get_entry(self, name: str) -> DataType | Decl:
@@ -148,7 +141,7 @@ class Env:
 
     # Infers the type of a term in the current environment
     def infer_type(self, term: Term) -> Term:
-        either, traces = bindings.infer_type(self.binding(), term.binding()).get()
+        either, traces = bindings.infer_type(self.binding, term.binding()).get()
         match either.kind:
             case Either.KIND_LEFT:
                 raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
@@ -157,12 +150,12 @@ class Env:
 
     # Checks that a term has the expected type in the current environment
     def check_type(self, term: Term, type_: Type):
-        error, traces = bindings.check_type(self.binding(), term.binding(), type_.binding()).get()
+        error, traces = bindings.check_type(self.binding, term.binding(), type_.binding()).get()
         if error.kind == Maybe.KIND_JUST:
             raise PiDslError(str(error.get_just()), tracing.from_bindings(traces.get()))
 
     def elaborate(self, term: Term) -> Term:
-        either, traces = bindings.elaborate(self.binding(), term.binding()).get()
+        either, traces = bindings.elaborate(self.binding, term.binding()).get()
         match either.kind:
             case Either.KIND_LEFT:
                 raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
@@ -170,7 +163,7 @@ class Env:
                 return binding_to_term(either.get_right(), self)
 
     def delaborate(self, term: Term) -> Term:
-        either, traces = bindings.delaborate(self.binding(), term.binding()).get()
+        either, traces = bindings.delaborate(self.binding, term.binding()).get()
         match either.kind:
             case Either.KIND_LEFT:
                 raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
@@ -179,7 +172,7 @@ class Env:
 
     def elaborate_against(self, term: Term, type_: Type) -> Term:
         either, traces = \
-            bindings.elaborate_against(self.binding(), term.binding(), type_.binding()).get()
+            bindings.elaborate_against(self.binding, term.binding(), type_.binding()).get()
         match either.kind:
             case Either.KIND_LEFT:
                 raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
@@ -188,7 +181,7 @@ class Env:
 
     def delaborate_against(self, term: Term, type_: Type) -> Term:
         either, traces = \
-            bindings.delaborate_against(self.binding(), term.binding(), type_.binding()).get()
+            bindings.delaborate_against(self.binding, term.binding(), type_.binding()).get()
         match either.kind:
             case Either.KIND_LEFT:
                 raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
@@ -196,12 +189,12 @@ class Env:
                 return binding_to_term(either.get_right(), self)
 
     def unify(self, term1: Term, term2: Term):
-        error, traces = bindings.unify(self.binding(), term1.binding(), term2.binding()).get()
+        error, traces = bindings.unify(self.binding, term1.binding(), term2.binding()).get()
         if error.kind == Maybe.KIND_JUST:
             raise PiDslError(str(error.get_just()), tracing.from_bindings(traces.get()))
 
     def whnf(self, term: Term) -> Term:
-        either, traces = bindings.whnf(self.binding(), term.binding()).get()
+        either, traces = bindings.whnf(self.binding, term.binding()).get()
         match either.kind:
             case Either.KIND_LEFT:
                 raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
@@ -209,7 +202,7 @@ class Env:
                 return binding_to_term(either.get_right(), self)
 
     def instantiate_mvars(self, term: Term) -> Term:
-        either, traces = bindings.instantiate_mvars(self.binding(), term.binding()).get()
+        either, traces = bindings.instantiate_mvars(self.binding, term.binding()).get()
         match either.kind:
             case Either.KIND_LEFT:
                 raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))

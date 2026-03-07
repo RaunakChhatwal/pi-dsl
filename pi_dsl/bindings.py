@@ -325,13 +325,9 @@ set_export_signature("ppr_term", [Term], String)
 def ppr_term(term: Term) -> String:
     return call_export("ppr_term", [term])
 
-set_export_signature("entries_to_env", [List[Entry]], Env)
-def entries_to_env(entries: List[Entry]) -> Env:
-    return call_export("entries_to_env", [entries])
-
-set_export_signature("check_entry", [Env, Entry], Tuple[Either[String, Entry], List[Trace]])
-def check_entry(env: Env, entry: Entry) -> Tuple[Either[String, Entry], List[Trace]]:
-    return call_export("check_entry", [env, entry])
+set_export_signature("add_entry", [Env, Entry], Tuple[Either[String, Env], List[Trace]])
+def add_entry(env: Env, entry: Entry) -> Tuple[Either[String, Env], List[Trace]]:
+    return call_export("add_entry", [env, entry])
 
 set_export_signature("infer_type", [Env, Term], Tuple[Either[String, Type], List[Trace]])
 def infer_type(env: Env, term: Term) -> Tuple[Either[String, Type], List[Trace]]:

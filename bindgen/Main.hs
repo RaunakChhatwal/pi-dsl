@@ -28,11 +28,8 @@ main = putStrLn $(State.evalStateT (do
   addBinding $ functionBinding "ppr_term" ["term"]
     <$> sequence [[t| Term |]] <*> [t| String |]
 
-  addBinding $ functionBinding "entries_to_env" ["entries"]
-    <$> sequence [[t| [Entry] |]] <*> [t| Env |]
-
-  addBinding $ functionBinding "check_entry" ["env", "entry"]
-    <$> sequence [[t| Env |], [t| Entry |]] <*> [t| (Either String Entry, [Trace]) |]
+  addBinding $ functionBinding "add_entry" ["env", "entry"]
+    <$> sequence [[t| Env |], [t| Entry |]] <*> [t| (Either String Env, [Trace]) |]
 
   addBinding $ functionBinding "infer_type" ["env", "term"]
     <$> sequence [[t| Env |], [t| Term |]] <*> [t| (Either String Type, [Trace]) |]
