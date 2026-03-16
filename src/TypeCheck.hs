@@ -46,7 +46,11 @@ elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
     term <- elaborateAgainst term type'
     return $ Ann term type'
 
-  Lam _ _ -> throwError "Unguided lambda elaboration not implemented"
+  Lam binderInfo binder -> do
+    type' <- newMVar . Sort =<< newLevelMVar
+    (name, body) <- Unbound.unbind binder
+    body <- addLocal name type' $ elaborate body
+    return $ Lam binderInfo $ Unbound.bind name body
 
   _ -> return term
 
@@ -126,7 +130,11 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
 
   Sort level -> return $ Sort $ Succ level
 
-  Lam _ _ -> throwError "Lambda inference not implemented (add a type annotation)"
+  Lam binderInfo binder -> do
+    paramType <- newMVar . Sort =<< newLevelMVar
+    (paramName, body) <- Unbound.unbind binder
+    returnType <- addLocal paramName paramType $ inferType body
+    return $ Pi binderInfo paramType $ Unbound.bind paramName returnType
 
   Pi _ paramType binder -> do
     (paramName, returnType) <- Unbound.unbind binder

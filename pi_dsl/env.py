@@ -53,7 +53,7 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
             return Var.from_binding(binding.get_l_var())
 
         case bindings.Term.KIND_M_VAR:
-            raise NotImplementedError
+            return MVar(int(binding.get_m_var()))
 
         case bindings.Term.KIND_CONST:
             const_binding, levels_binding = binding.get_const()

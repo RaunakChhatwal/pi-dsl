@@ -135,7 +135,7 @@ lookUpMVarType id = do
   tcState <- State.get
   case Map.lookup id tcState.mvarTypes of
     Just type' -> return type'
-    Nothing -> throwError [i|Meta #{id} not found|]
+    Nothing -> throwError [i|MVar ?#{id} not found|]
 
 lookUpMVarSolution :: Int -> TcMonad (Maybe Term)
 lookUpMVarSolution id = Map.lookup id . (.mvarSolutions) <$> State.get
@@ -174,7 +174,7 @@ assignMVar id term = do
   if mvarOccursCheck id term
     then err [DS [i|"Occurs check failed for ?#{id} in"|], DD term]
     else unless (null $ Unbound.toListOf @Term @TermName Unbound.fv term) $
-      err [DS [i|Meta variable solution for ?#{id} not closed:|], DD term]
+      err [DS [i|MVar solution for ?#{id} not closed:|], DD term]
   tcState <- State.get
   State.put $ tcState { mvarSolutions = Map.insert id term tcState.mvarSolutions }
 

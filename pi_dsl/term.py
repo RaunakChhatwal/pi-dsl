@@ -186,6 +186,14 @@ class Var(Term):
     def from_binding(name: TermName) -> Var:
         return Var(str(name.get_fn()[0]), int(name.get_fn()[1]))
 
+@dataclass
+class MVar(Term):
+    id: int
+
+    # Convert variable to Haskell binding as a local variable
+    def binding(self) -> bindings.Term:
+        return bindings.Term.init_m_var(Int(self.id))
+
 # Hole variable representing an unnamed/inferred position
 hole = Var("_")
 

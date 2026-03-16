@@ -45,10 +45,6 @@ def remove_stub(term: Term, self: DataType) -> Term:
             return Ann(remove_stub(body, self), remove_stub(hint, self))
         case App(func, arg):
             return App(remove_stub(func, self), remove_stub(arg, self))
-        # case Ctor(name, datatype, signature):
-        #     datatype = copy(datatype)
-        #     datatype.signature = remove_stub(datatype.signature, self)
-        #     return Ctor(name, datatype, remove_stub(signature, self))
         case Lam(vars, body):
             return Lam(vars, remove_stub(body, self))
         case Pi(params, return_type):
@@ -113,11 +109,10 @@ def infer_univ_params(term: Term) -> set[str]:
 def datatype(env: Env, signature: Type=Set):
     def decorator[T: DataTypeMeta](cls: T) -> T:
         cls.signature = signature
-        # cls.univ_params = []
         cls.ctors = []
         cls.level_args = []
 
-        for class_var, hint in cls.__dict__.get("__annotations__", {}).items():
+        for class_var, hint in inspect.get_annotations(cls, eval_str=True).items():
             if not isinstance(hint, Hint):
                 continue
 
