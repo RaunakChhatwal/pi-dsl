@@ -1,21 +1,24 @@
 from .env import env
-from ..term import Ctor, Pi, Rec, Term, Set, Var
+from ..term import Ctor, Level, Max, Pi, Rec, Term, Sort, Var
 from ..sugar import datatype, decl, DataTypeMeta, lam, Self
 
 # Sum type: Either A B is either a Left A or a Right B
 A, B = Var("A"), Var("B")
-@datatype(env, signature=Pi([(A, Set), (B, Set)], Set))
+u = Level("u")
+v = Level("v")
+w = Level("w")
+@datatype(env, signature=Pi([(A, Sort(u)), (B, Sort(v))], Sort(Max(u, v))))
 class Either(metaclass=DataTypeMeta):
     # Left constructor: injects a value of type A into Either A B
-    left: Ctor[Pi([(A, Set), (B, Set), A], Self(A, B))]
+    left: Ctor[Pi([(A, Sort(u)), (B, Sort(v)), A], Self(A, B))]
     # Right constructor: injects a value of type B into Either A B
-    right: Ctor[Pi([(A, Set), (B, Set), B], Self(A, B))]
+    right: Ctor[Pi([(A, Sort(u)), (B, Sort(v)), B], Self(A, B))]
 
 # Eliminator for Either: applies f to Left values and g to Right values
 T = Var("T")
 @decl(env)
 def either(
-    A: Var[Set], B: Var[Set], T: Var[Set], f: Var[A >> T], g: Var[B >> T], e: Var[Either(A, B)]
+    A: Var[Sort(u)], B: Var[Sort(v)], T: Var[Sort(w)], f: Var[A >> T], g: Var[B >> T], e: Var[Either(A, B)]
 ) -> Term[T]:
     motive = lam(lambda A, B, _: Pi([A >> T, B >> T], T))
     left_case = lam(lambda A, B, a, f, g: f(a))

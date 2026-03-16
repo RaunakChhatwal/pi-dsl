@@ -1,133 +1,64 @@
--- | A Pretty Printer.
-module PrettyPrint (Disp (..), D (..), PP.Doc, ppr, debug) where
+module PrettyPrint where
 
+import Prelude hiding ((<>))
+import Control.Monad (forM)
 import Control.Monad.Reader (MonadReader (ask, local), asks)
-import Data.Set qualified as S
-
-import Text.PrettyPrint (Doc, (<+>))
-import qualified Text.PrettyPrint as PP
-import Unbound.Generics.LocallyNameless qualified as Unbound
-import qualified Unbound.Generics.LocallyNameless.Name as Unbound
-import Unbound.Generics.LocallyNameless.Internal.Fold (toListOf)
-
-import Syntax
-import Data.String.Interpolate (i)
 import Data.Foldable (find)
 import Data.Maybe (fromJust)
+import Data.Set (Set)
+import Data.Set qualified as Set
+import Data.String.Interpolate (i)
+import Text.PrettyPrint (Doc, (<>), (<+>))
+import Text.PrettyPrint qualified as PP
+import Unbound.Generics.LocallyNameless qualified as Unbound
+import Unbound.Generics.LocallyNameless.Name qualified as Unbound
+import Unbound.Generics.LocallyNameless.Internal.Fold (toListOf)
+import Syntax
 
--------------------------------------------------------------------------
+displayUnivParams :: [UnivParamName] -> Doc
+displayUnivParams [] = PP.empty
+displayUnivParams univParamNames =
+  PP.text ".{" <> PP.hsep (PP.punctuate PP.comma (map PP.text univParamNames)) <> PP.text "}"
 
--- * Classes and Types for Pretty Printing
-
--------------------------------------------------------------------------
-
--- | The 'Disp' class governs all types which can be turned into 'Doc's
--- The `disp` function is the main entry point for the pretty printer
-class Disp d where
-  disp :: d -> Doc
-  debugDisp :: d -> Doc
-
-  default disp :: (Display d) => d -> Doc
-  disp d = display d initDI
-
-  default debugDisp :: (Display d) => d -> Doc
-  debugDisp d = display d initDI{showLongNames = True, showAnnots=True}
+disp :: Display a => a -> Doc
+disp = flip display DispInfo { taken = Set.empty, prec = 0 }
 
 -- | Convenience entry point for the pretty printer
-ppr :: Disp d => d -> String
-ppr p = PP.render (disp p)
+ppr :: Display a => a -> String
+ppr = PP.render . disp
 
-debug :: Disp d => d -> String
-debug p = PP.render (debugDisp p)
-
--- | The 'Display' class is like the 'Disp' class. It qualifies
---   types that can be turned into 'Doc'.  The difference is that
---   this class uses the 'DispInfo' parameter and the Unbound library
---   to generate fresh names during printing.
-class (Unbound.Alpha t) => Display t where
+class Unbound.Alpha a => Display a where
   -- | Convert a value to a 'Doc'.
-  display :: t -> DispInfo -> Doc
+  display :: a -> DispInfo -> Doc
+
+instance {-# OVERLAPPABLE #-} (Show a, Unbound.Alpha a) => Display a where
+  display = return . PP.text . show
 
 -- | The data structure for information about the display
-data DispInfo = DI
-  { -- | should we show type annotations?
-    showAnnots :: Bool,
-    -- | names that have been used
-    dispAvoid :: S.Set Unbound.AnyName,
-    -- | current precedence level
-    prec :: Int,
-    -- | should we print internally-generated names, or user-friendly versions
-    showLongNames :: Bool
-  }
+data DispInfo = DispInfo {
+  taken :: Set Unbound.AnyName, -- names that have been used
+  prec :: Int -- current precedence level
+}
 
 -- | Error message quoting
-data D
-  = -- | String literal
-    DS String
-  | -- | Displayable value
-    forall a. Disp a => DD a
-
-initDI :: DispInfo
-initDI = DI {showAnnots = True,
-                          dispAvoid = S.empty,
-                          prec = 0,
-                          showLongNames = True
-                          }
-
-
--------------------------------------------------------------------------
-
--- * Disp Instances for quoting, errors, source positions, names
-
--------------------------------------------------------------------------
-
-instance Disp D where
-  disp (DS s) = PP.text s
-  disp (DD d) = PP.nest 2 $ disp d
-
-  debugDisp d@(DS _) = disp d
-  debugDisp (DD d) = PP.nest 2 $ debugDisp d
-
-instance Disp [D] where
-  disp dl = PP.sep $ map disp dl
-  debugDisp dl = PP.sep $ map disp dl
-
-instance Disp (Unbound.Name Term) where
-  disp = PP.text . Unbound.name2String
-  debugDisp = PP.text . show
-
--------------------------------------------------------------------------
-
--- * Disp Instances for Term syntax (defaults to Display, see below)
-
--------------------------------------------------------------------------
-
-instance Disp Term
-
-instance Disp Entry
-
-instance Disp [Entry]
-
+data D = DS String | forall a. Display a => DD a
 
 instance Display [Entry] where
-  display ds = do
-    dd <- mapM display ds
-    pure $ PP.vcat dd
-
+  display entries = PP.vcat <$> mapM display entries
 
 instance Display Entry where
-  display (Decl var hint def) = PP.hang <$> decl <*> pure 2 <*> display def where
+  display (Decl var univParamNames hint def) = PP.hang <$> decl <*> pure 2 <*> display def where
     decl = foldl1 (<+>) <$> sequence
-      [display var, pure $ PP.text ":", display hint, pure $ PP.text "="]
-  display (Data n params constructors) = do
-    dn <- display n
-    dp <- display params
-    dc <- mapM (\(ctorName, ctorType) -> do
-      dcn <- display ctorName
-      dct <- display ctorType
-      pure $ dcn <+> PP.text ":" <+> dct) constructors
-    pure $ PP.hang (PP.text "data" <+> dn <+> PP.text ":" <+> dp <+> PP.text "where") 2 (PP.vcat dc)
+      [pure $ PP.text var <> displayUnivParams univParamNames, pure $ PP.text ":", display hint, pure $ PP.text "="]
 
+  display (Data name univParamNames params ctors) = do
+    name <- display name
+    params <- display params
+    ctors <- forM ctors $ \(ctorName, ctorType) -> do
+      ctorName <- display ctorName
+      ctorType <- display ctorType
+      return $ ctorName <+> PP.text ":" <+> ctorType
+    return $ PP.hang (PP.text "data" <+> (name <> displayUnivParams univParamNames) <+> PP.text ":" <+> params <+> PP.text "where") 2 (PP.vcat ctors)
 
 instance Display Const where
   display (GVar name) = display name
@@ -135,93 +66,32 @@ instance Display Const where
   display (Ctor typeName ctorName) = display @String [i|#{typeName}.#{ctorName}|]
   display (Rec typeName) = display @String [i|#{typeName}.rec|]
 
--------------------------------------------------------------------------
+instance Display Level where
+  display level
+    | Just n <- levelToInt level = return $ PP.int n
+    | otherwise = do
+        baseDoc <- case baseLevel of
+          Max level1 level2 -> do
+            level1 <- display level1
+            level2 <- display level2
+            return $ PP.text "max" <> PP.parens (level1 <> PP.comma <+> level2)
+          Param univParamName -> return $ PP.text univParamName
+          LMVar id -> return $ PP.text $ "?u#" ++ show id
+          Zero -> return $ PP.int 0
+          Succ _ -> error "unreachable normalized level"
+        return $ case offset of
+          0 -> baseDoc
+          _ | baseLevel == Zero -> PP.int offset
+          _ -> parenthesizeIfNeeded baseLevel baseDoc <> PP.text "+" <> PP.int offset
+    where
+      (baseLevel, offset) = unfoldSucc level
 
--- * Disp Instances for Prelude types
-
--------------------------------------------------------------------------
-
-instance Disp String where
-  disp = PP.text
-  debugDisp = disp
-
-instance Disp Int where
-  disp = PP.text . show
-  debugDisp = disp
-
-instance Disp Integer where
-  disp = PP.text . show
-  debugDisp = disp
-
-instance Disp Double where
-  disp = PP.text . show
-  debugDisp = disp
-
-instance Disp Float where
-  disp = PP.text . show
-  debugDisp = disp
-
-instance Disp Char where
-  disp = PP.text . show
-  debugDisp = disp
-
-instance Disp Bool where
-  disp = PP.text . show
-  debugDisp = disp
-
-dispMaybe :: (t -> Doc) -> Maybe t -> Doc
-dispMaybe disp m = case m of
-  (Just a) -> PP.text "Just" <+> disp a
-  Nothing -> PP.text "Nothing"
-
-instance Disp a => Disp (Maybe a) where
-  disp = dispMaybe disp
-  debugDisp = dispMaybe debugDisp
-
-
-dispEither :: (Disp a, Disp b) => (forall a. Disp a => a -> Doc) -> Either a b -> Doc
-dispEither disp e = case e of
-     (Left a) -> PP.text "Left" <+> disp a
-     (Right a) -> PP.text "Right" <+> disp a
-
-instance (Disp a, Disp b) => Disp (Either a b) where
-  disp = dispEither disp
-  debugDisp = dispEither debugDisp
-
-
--------------------------------------------------------------------------
-
--- * Display instances for Prelude types used in AST
-
--------------------------------------------------------------------------
+      parenthesizeIfNeeded baseLevel = case baseLevel of
+        Max _ _ -> PP.parens
+        _ -> id
 
 instance Display String where
   display = return . PP.text
-
-instance Display Int where
-  display = return . PP.text . show
-
-instance Display Integer where
-  display = return . PP.text . show
-
-instance Display Double where
-  display = return . PP.text . show
-
-instance Display Float where
-  display = return . PP.text . show
-
-instance Display Char where
-  display = return . PP.text . show
-
-instance Display Bool where
-  display = return . PP.text . show
-
--------------------------------------------------------------------------
-
--- * Display instances for Terms
-
--------------------------------------------------------------------------
-
 
 levelApp :: Int
 levelApp     = 10
@@ -231,10 +101,10 @@ levelArrow :: Int
 levelArrow   = 5
 
 withPrec :: MonadReader DispInfo m => Int -> m a -> m a
-withPrec p = local (\d -> d { prec = p })
+withPrec prec = local (\dispInfo -> dispInfo { prec = prec })
 
-parens :: Bool -> Doc -> Doc
-parens b = if b then PP.parens else id
+parensIf :: Bool -> Doc -> Doc
+parensIf b = if b then PP.parens else id
 
 showNameExact :: Unbound.Name a -> String
 showNameExact (Unbound.Fn name id) = [i|#{name}.#{id}|]
@@ -248,57 +118,63 @@ piDocs (Pi binderInfo paramType bind) = Unbound.lunbind bind $ \(paramName, retu
   paramDoc <- if paramName `elem` toListOf Unbound.fv returnType
     then fmap PP.parens $ (<+>) . (<+> PP.colon) <$> display paramName <*> display paramType
     else withPrec (levelArrow + 1) (display paramType)
-  let paramDoc' = case binderInfo of
-        Implicit -> PP.braces paramDoc
-        Explicit -> paramDoc
-  (paramDoc' :) <$> piDocs returnType
-piDocs returnType = pure <$> display returnType
+  paramDoc <- return $ case binderInfo of
+    Implicit -> PP.braces paramDoc
+    Explicit -> paramDoc
+  (paramDoc :) <$> piDocs returnType
+piDocs returnType = return <$> display returnType
 
 instance Display Term where
   display (Sort Zero) = return $ PP.text "Set"
-  display (Sort level) = return $ PP.text ("Sort" ++ show level)
+
+  display (Sort level) = (PP.text "Sort" <+>) <$> display level
+
   display (LVar name) = display name
-  display (MVar i) = display @String ("?" ++ show i)
-  display (Const const') = display const'
+
+  display (MVar i) = display $ "?" ++ show i
+
+  display (Const constant levels) = (<>) <$> display constant <*> displayLevels levels where
+    displayLevels [] = const PP.empty
+    displayLevels levels = do
+      dlevels <- mapM display levels
+      return $ PP.text ".{" <> PP.hsep (PP.punctuate PP.comma dlevels) <> PP.text "}"
+
   display a@(Lam _ _) = do
     n <- asks (.prec)
     (binds, body) <- withPrec levelLam $ gatherBinders a
-    return $ parens (levelLam < n) $ PP.hang (PP.text "\\" PP.<> PP.hsep binds PP.<> PP.text ".") 2 body
+    return $ parensIf (levelLam < n) $
+      PP.hang (PP.text "\\" <> PP.hsep binds <> PP.text ".") 2 body where
+      gatherBinders (Lam _ b) =
+        Unbound.lunbind b $ \(name, body) -> do
+          name <- display name
+          (rest, body') <- gatherBinders body
+          return (name : rest, body')
+      gatherBinders body = ([],) <$> display body
+
   display app@(App _ _) = do
-    n <- asks (.prec)
+    prec <- asks (.prec)
     let (func, args) = unfoldApps app
-    df <- withPrec levelApp (display func)
-    dargs <- mapM (withPrec (levelApp+1) . display) args
-    return $ parens (levelApp < n) $ PP.hang df 2 (PP.sep dargs)
+    func <- withPrec levelApp $ display func
+    args <- mapM (withPrec (levelApp + 1) . display) args
+    return $ parensIf (levelApp < prec) $ PP.hang func 2 $ PP.sep args
+
   display piType@(Pi {}) = do
     precision <- asks (.prec)
-    let arrow = PP.space <> PP.text "->"
-    parens (levelArrow < precision) . PP.sep . PP.punctuate arrow <$> piDocs piType
-  display (Ann a b) = do
-    sa <- asks (.showAnnots)
-    if sa then do
-      da <- withPrec 0 (display a)
-      db <- withPrec 0 (display b)
-      return $ PP.parens (da <+> PP.text ":" <+> db)
-      else display a
+    let arrow = mappend PP.space $ PP.text "->"
+    parensIf (levelArrow < precision) . PP.sep . PP.punctuate arrow <$> piDocs piType
 
-gatherBinders :: Term -> DispInfo -> ([Doc], Doc)
-gatherBinders (Lam _ b) =
-  Unbound.lunbind b $ \(n, body) -> do
-    dn <- display n
-    (rest, body') <- gatherBinders body
-    return (dn : rest, body')
-gatherBinders body = do
-  db <- display body
-  return ([], db)
-
+  display (Ann term type') = do
+    term <- withPrec 0 $ display term
+    type' <- withPrec 0 $ display type'
+    return $ PP.parens $ term <+> PP.text ":" <+> type'
 
 -- LFresh instance for DisplayInfo reader monad
 instance Unbound.LFresh ((->) DispInfo) where
-  lfresh nm = do
-    let s = Unbound.name2String nm
-    di <- ask
-    return $ fromJust $
-      find (\x -> Unbound.AnyName x `S.notMember` di.dispAvoid) (map (Unbound.makeName s) [0 ..])
-  getAvoids = asks (.dispAvoid)
-  avoid names = local upd where upd di = di { dispAvoid = S.fromList names `S.union` di.dispAvoid }
+  lfresh name = do
+    DispInfo dispAvoid _ <- ask
+    let baseName = Unbound.name2String name
+    let freshNames = map (Unbound.makeName baseName) [0 ..]
+    return $ fromJust $ find ((`Set.notMember` dispAvoid) . Unbound.AnyName) freshNames
+  getAvoids = asks (.taken)
+  avoid names = local $
+    \dispInfo -> dispInfo { taken = Set.fromList names `Set.union` dispInfo.taken }

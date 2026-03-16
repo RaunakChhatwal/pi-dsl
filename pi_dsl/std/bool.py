@@ -1,5 +1,5 @@
 from .env import env
-from ..term import Ctor, Rec, Term, Set, Var
+from ..term import Ctor, Level, Rec, Term, Sort, Var
 from ..sugar import datatype, decl, DataTypeMeta, lam, Self
 
 # Boolean datatype with two constructors: false and true
@@ -10,8 +10,9 @@ class Bool(metaclass=DataTypeMeta):
 
 # Eliminates a Bool by returning t if true, f if false
 T = Var("T")
+u = Level("u")
 @decl(env)
-def if_(T: Var[Set], t: Var[T], f: Var[T], cond: Var[Bool]) -> Term[T]:
+def if_(T: Var[Sort(u)], t: Var[T], f: Var[T], cond: Var[Bool]) -> Term[T]:
     motive = lam(lambda _: T)
     return Rec(Bool)(motive, f, t, cond)
 

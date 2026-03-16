@@ -9,24 +9,45 @@ from .term import *
 @dataclass
 class Decl:
     var: Global
+    univ_params: list[str]
     signature: Type
     body: Term
 
     # Converts this declaration to a Haskell Entry binding for type checking
     def entry_binding(self) -> bindings.Entry:
+        univ_params = \
+            bindings.List[bindings.UnivParamName](*[String(param) for param in self.univ_params])
         return bindings.Entry.init_decl(
-            String(self.var.name), self.signature.binding(), self.body.binding())
+            String(self.var.name), univ_params, self.signature.binding(), self.body.binding())
+
+def instantiate_datatype(datatype: DataType, level_args: list[IntoLevel]) -> DataType:
+    univ_params, signature, ctors = datatype.univ_params, datatype.signature, datatype.ctors
+    datatype = DataType(datatype.name, univ_params, signature, [], level_args=level_args)
+    datatype.ctors = \
+        [Ctor(ctor.name, datatype, ctor.signature, level_args=level_args) for ctor in ctors]
+    return datatype
+
+def const_binding_to_term(binding: bindings.Const, levels: list[bindings.Level], env: Env) -> Const:
+    level_args: list[IntoLevel] = [Level.from_binding(level) for level in levels]
+    match binding.kind:
+        case bindings.Const.KIND_G_VAR:
+            return Global(str(binding.get_g_var()), level_args=level_args)
+        case bindings.Const.KIND_DATA_TYPE:
+            return instantiate_datatype(env.datatypes[str(binding.get_data_type())], level_args)
+        case bindings.Const.KIND_CTOR:
+            type_name, ctor_name = binding.get_ctor()
+            datatype = instantiate_datatype(env.datatypes[str(type_name)], level_args)
+            return [ctor for ctor in datatype.ctors if ctor.name == str(ctor_name)][0]
+        case bindings.Const.KIND_REC:
+            datatype = instantiate_datatype(
+                env.datatypes[str(binding.get_rec())], level_args[1:] if level_args else [])
+            return Rec(datatype, level_args=level_args)
 
 # Converts a Haskell Term binding back into a Python Term AST node
 def binding_to_term(binding: bindings.Term, env: Env) -> Term:
     match binding.kind:
         case bindings.Term.KIND_SORT:
-            level = 0
-            level_binding = binding.get_sort()
-            while level_binding.kind == bindings.Level.KIND_SUCC:
-                level += 1
-                level_binding = level_binding.get_succ()
-            return Sort(level)
+            return Sort(Level.from_binding(binding.get_sort()))
 
         case bindings.Term.KIND_L_VAR:
             return Var.from_binding(binding.get_l_var())
@@ -35,18 +56,8 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
             raise NotImplementedError
 
         case bindings.Term.KIND_CONST:
-            const_binding = binding.get_const()
-            match const_binding.kind:
-                case bindings.Const.KIND_G_VAR:
-                    return Global(str(const_binding.get_g_var()))
-                case bindings.Const.KIND_DATA_TYPE:
-                    return env.datatypes[str(const_binding.get_data_type())]
-                case bindings.Const.KIND_CTOR:
-                    type_name, ctor_name = const_binding.get_ctor()
-                    data_type = env.datatypes[str(type_name)]
-                    return [ctor for ctor in data_type.ctors if ctor.name == str(ctor_name)][0]
-                case bindings.Const.KIND_REC:
-                    return Rec(env.datatypes[str(const_binding.get_rec())])
+            const_binding, levels_binding = binding.get_const()
+            return const_binding_to_term(const_binding, levels_binding.get(), env)
 
         case bindings.Term.KIND_LAM:
             binder_info, binder = binding.get_lam()
@@ -105,7 +116,7 @@ class Env:
                 case DataType():
                     self.add_datatype(entry)
                 case Decl():
-                    self.declare(entry.var, entry.signature, entry.body)
+                    self.declare(entry.var, entry.univ_params, entry.signature, entry.body)
 
     # Adds a datatype to the environment and type checks incrementally
     def add_datatype(self, datatype: DataType):
@@ -119,15 +130,16 @@ class Env:
         self.binding = either.get_right()
 
     # Adds a declaration with signature and body to the environment, type checks incrementally
-    def declare(self, var: Global, hint: Type, defn: Term):
+    def declare(self, var: Global, univ_params: list[str], hint: Type, defn: Term):
         assert var.name not in self.entries
+        decl = Decl(var, univ_params, hint, defn)
         either, traces = \
-            bindings.add_entry(self.binding, Decl(var, hint, defn).entry_binding()).get()
+            bindings.add_entry(self.binding, decl.entry_binding()).get()
         if either.kind == Either.KIND_LEFT:
             raise PiDslError(str(either.get_left()), tracing.from_bindings(traces.get()))
 
         self.entries.append(var.name)
-        self.decls[var.name] = Decl(var, hint, defn)
+        self.decls[var.name] = decl
         self.binding = either.get_right()
 
     # Retrieves a datatype or declaration entry by name

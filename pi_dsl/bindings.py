@@ -71,10 +71,29 @@ class Map[T1, T2](TaggedUnion):
         return self.get_field(Tuple[Size, T1, T2, Map[T1, T2], Map[T1, T2]]).get()
 
 class Level(TaggedUnion):
-    kind: Literal[0, 1]
+    kind: Literal[0, 1, 2, 3, 4]
     
     KIND_ZERO = 0
-    KIND_SUCC = 1
+    KIND_PARAM = 1
+    KIND_L_M_VAR = 2
+    KIND_SUCC = 3
+    KIND_MAX = 4
+    
+    @classmethod
+    def init_param(cls, value: UnivParamName):
+        return cls(cls.KIND_PARAM, value)
+    
+    def get_param(self) -> UnivParamName:
+        assert self.kind == self.KIND_PARAM
+        return self.get_field(UnivParamName)
+    
+    @classmethod
+    def init_l_m_var(cls, value: Int):
+        return cls(cls.KIND_L_M_VAR, value)
+    
+    def get_l_m_var(self) -> Int:
+        assert self.kind == self.KIND_L_M_VAR
+        return self.get_field(Int)
     
     @classmethod
     def init_succ(cls, value: Level):
@@ -83,6 +102,14 @@ class Level(TaggedUnion):
     def get_succ(self) -> Level:
         assert self.kind == self.KIND_SUCC
         return self.get_field(Level)
+    
+    @classmethod
+    def init_max(cls, *values: *tuple[Level, Level]):
+        return cls(cls.KIND_MAX, init_tuple(*values))
+    
+    def get_max(self) -> tuple[Level, Level]:
+        assert self.kind == self.KIND_MAX
+        return self.get_field(Tuple[Level, Level]).get()
 
 class Name[T1](TaggedUnion):
     kind: Literal[0, 1]
@@ -202,12 +229,12 @@ class Term(TaggedUnion):
         return self.get_field(Int)
     
     @classmethod
-    def init_const(cls, value: Const):
-        return cls(cls.KIND_CONST, value)
+    def init_const(cls, *values: *tuple[Const, List[Level]]):
+        return cls(cls.KIND_CONST, init_tuple(*values))
     
-    def get_const(self) -> Const:
+    def get_const(self) -> tuple[Const, List[Level]]:
         assert self.kind == self.KIND_CONST
-        return self.get_field(Const)
+        return self.get_field(Tuple[Const, List[Level]]).get()
     
     @classmethod
     def init_lam(cls, *values: *tuple[BinderInfo, Bind[TermName, Term]]):
@@ -240,6 +267,32 @@ class Term(TaggedUnion):
     def get_ann(self) -> tuple[Term, Type]:
         assert self.kind == self.KIND_ANN
         return self.get_field(Tuple[Term, Type]).get()
+
+class DataTypeInfo(TaggedUnion):
+    kind: Literal[0]
+    
+    KIND_DATA_TYPE_INFO = 0
+    
+    @classmethod
+    def init_data_type_info(cls, *values: *tuple[List[UnivParamName], Type, List[Tuple[CtorName, Type]], UnivParamName, Type]):
+        return cls(cls.KIND_DATA_TYPE_INFO, init_tuple(*values))
+    
+    def get_data_type_info(self) -> tuple[List[UnivParamName], Type, List[Tuple[CtorName, Type]], UnivParamName, Type]:
+        assert self.kind == self.KIND_DATA_TYPE_INFO
+        return self.get_field(Tuple[List[UnivParamName], Type, List[Tuple[CtorName, Type]], UnivParamName, Type]).get()
+
+class DeclInfo(TaggedUnion):
+    kind: Literal[0]
+    
+    KIND_DECL_INFO = 0
+    
+    @classmethod
+    def init_decl_info(cls, *values: *tuple[List[UnivParamName], Type, Term]):
+        return cls(cls.KIND_DECL_INFO, init_tuple(*values))
+    
+    def get_decl_info(self) -> tuple[List[UnivParamName], Type, Term]:
+        assert self.kind == self.KIND_DECL_INFO
+        return self.get_field(Tuple[List[UnivParamName], Type, Term]).get()
 
 class LocalContext(TaggedUnion):
     kind: Literal[0]
@@ -274,12 +327,12 @@ class Env(TaggedUnion):
     KIND_ENV = 0
     
     @classmethod
-    def init_env(cls, *values: *tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], LocalContext, Maybe[Tuple[DataTypeName, Type]]]):
+    def init_env(cls, *values: *tuple[Map[DataTypeName, DataTypeInfo], Map[String, DeclInfo], LocalContext, Maybe[Tuple[DataTypeName, Tuple[List[UnivParamName], Type]]]]):
         return cls(cls.KIND_ENV, init_tuple(*values))
     
-    def get_env(self) -> tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], LocalContext, Maybe[Tuple[DataTypeName, Type]]]:
+    def get_env(self) -> tuple[Map[DataTypeName, DataTypeInfo], Map[String, DeclInfo], LocalContext, Maybe[Tuple[DataTypeName, Tuple[List[UnivParamName], Type]]]]:
         assert self.kind == self.KIND_ENV
-        return self.get_field(Tuple[Map[DataTypeName, Tuple[Type, List[Tuple[CtorName, Type]]]], Map[String, Tuple[Type, Term]], LocalContext, Maybe[Tuple[DataTypeName, Type]]]).get()
+        return self.get_field(Tuple[Map[DataTypeName, DataTypeInfo], Map[String, DeclInfo], LocalContext, Maybe[Tuple[DataTypeName, Tuple[List[UnivParamName], Type]]]]).get()
 
 class Entry(TaggedUnion):
     kind: Literal[0, 1]
@@ -288,24 +341,26 @@ class Entry(TaggedUnion):
     KIND_DATA = 1
     
     @classmethod
-    def init_decl(cls, *values: *tuple[String, Type, Term]):
+    def init_decl(cls, *values: *tuple[String, List[UnivParamName], Type, Term]):
         return cls(cls.KIND_DECL, init_tuple(*values))
     
-    def get_decl(self) -> tuple[String, Type, Term]:
+    def get_decl(self) -> tuple[String, List[UnivParamName], Type, Term]:
         assert self.kind == self.KIND_DECL
-        return self.get_field(Tuple[String, Type, Term]).get()
+        return self.get_field(Tuple[String, List[UnivParamName], Type, Term]).get()
     
     @classmethod
-    def init_data(cls, *values: *tuple[DataTypeName, Type, List[Tuple[CtorName, Type]]]):
+    def init_data(cls, *values: *tuple[DataTypeName, List[UnivParamName], Type, List[Tuple[CtorName, Type]]]):
         return cls(cls.KIND_DATA, init_tuple(*values))
     
-    def get_data(self) -> tuple[DataTypeName, Type, List[Tuple[CtorName, Type]]]:
+    def get_data(self) -> tuple[DataTypeName, List[UnivParamName], Type, List[Tuple[CtorName, Type]]]:
         assert self.kind == self.KIND_DATA
-        return self.get_field(Tuple[DataTypeName, Type, List[Tuple[CtorName, Type]]]).get()
+        return self.get_field(Tuple[DataTypeName, List[UnivParamName], Type, List[Tuple[CtorName, Type]]]).get()
 
 Size = Int
 
 DataTypeName = String
+
+UnivParamName = String
 
 TermName = Name[Term]
 

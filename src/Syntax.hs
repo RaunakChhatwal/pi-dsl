@@ -1,10 +1,11 @@
 module Syntax where
 
 import Data.Bifunctor (second)
+import Data.Function (on)
+import Data.Maybe (fromMaybe)
 import GHC.Generics (Generic, from)
 import Unbound.Generics.LocallyNameless qualified as Unbound
-
-import Data.Function (on)
+import Unbound.Generics.LocallyNameless.Bind qualified as Unbound
 
 -- Term name alias used by Unbound
 type TermName = Unbound.Name Term
@@ -14,24 +15,16 @@ type TermName = Unbound.Name Term
 -- as a type or as a term.
 type Type = Term
 
+type UnivParamName = String
+
 -- Universe level
-data Level = Zero | Succ Level
-  deriving Generic deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
-
--- Maximum of two universe levels
-maxLevel :: Level -> Level -> Level
-maxLevel Zero b = b
-maxLevel a Zero = a
-maxLevel (Succ a) (Succ b) = Succ $ maxLevel a b
-
--- Convert a Level to an Int
-levelToInt :: Level -> Int
-levelToInt Zero = 0
-levelToInt (Succ level) = 1 + levelToInt level
-
--- Show instance for Level via Int conversion
-instance Show Level where
-  show = show . levelToInt
+data Level
+  = Zero
+  | Param UnivParamName
+  | LMVar Int
+  | Succ Level
+  | Max Level Level
+  deriving (Eq, Ord, Generic, Show) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
 
 data Const
   = GVar String
@@ -48,7 +41,7 @@ data Term
   = Sort Level
   | LVar TermName
   | MVar Int
-  | Const Const
+  | Const Const [Level]
   | Lam BinderInfo (Unbound.Bind TermName Term)
   | App Term Term
   | Pi BinderInfo Type (Unbound.Bind TermName Type)
@@ -60,8 +53,46 @@ type DataTypeName = String
 -- Constructor names are represented as strings
 type CtorName = String
 -- Top-level environment entries (declarations and data types)
-data Entry = Decl String Type Term | Data DataTypeName Type [(CtorName, Type)]
+data Entry
+  = Decl String [UnivParamName] Type Term
+  | Data DataTypeName [UnivParamName] Type [(CtorName, Type)]
   deriving (Show, Generic) deriving anyclass (Unbound.Alpha, Unbound.Subst Term)
+
+levelToInt :: Level -> Maybe Int
+levelToInt Zero = Just 0
+levelToInt (Succ level) = (1 +) <$> levelToInt level
+levelToInt _ = Nothing
+
+unfoldSucc :: Level -> (Level, Int)
+unfoldSucc (Succ level) = second (1 +) $ unfoldSucc level
+unfoldSucc level = (level, 0)
+
+foldSucc :: (Level, Int) -> Level
+foldSucc (level, offset) = iterate Succ level !! offset
+
+getOffset :: Level -> Int
+getOffset = snd . unfoldSucc
+
+substLevelsInLevel :: [(UnivParamName, Level)] -> Level -> Level
+substLevelsInLevel substs = \case
+  Zero -> Zero
+  Succ level -> Succ $ substLevelsInLevel substs level
+  Max level1 level2 -> Max (substLevelsInLevel substs level1) (substLevelsInLevel substs level2)
+  Param univParamName -> fromMaybe (Param univParamName) $ lookup univParamName substs
+  LMVar id -> LMVar id
+
+substLevels :: [(UnivParamName, Level)] -> Term -> Term
+substLevels substs = \case
+  Sort level -> Sort $ substLevelsInLevel substs level
+  Const constant levels -> Const constant $ map (substLevelsInLevel substs) levels
+  App func arg -> App (substLevels substs func) (substLevels substs arg)
+  Lam binderInfo (Unbound.B paramName body) ->
+    Lam binderInfo $ Unbound.B paramName $ substLevels substs body
+  Pi binderInfo paramType (Unbound.B paramName returnType) ->
+    let binder = Unbound.B paramName $ substLevels substs returnType
+    in Pi binderInfo (substLevels substs paramType) binder
+  Ann term type' -> Ann (substLevels substs term) (substLevels substs type')
+  term -> term
 
 -- Unfold nested applications into (head, args)
 unfoldApps :: Term -> (Term, [Term])

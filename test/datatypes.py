@@ -15,7 +15,7 @@ class Fin(metaclass=DataTypeMeta):
     succ: Ctor[(n, Nat) >> ((m, Self(n)) >> Self(Nat.succ(n)))]
 
 # Verify Fin recursor type
-env.check_type(env.infer_type(Rec(Fin)), Sort(1))
+env.check_type(env.infer_type(env.elaborate(Rec(Fin))), Sort(1))
 
 # N-ary trees indexed by branching factor n
 subtrees = Var("subtrees")
@@ -27,7 +27,7 @@ class NTree(metaclass=DataTypeMeta):
     node: Ctor[Pi([(n, Nat), (subtrees, (m, Fin(n)) >> Self(n))], Self(n))]
 
 # Verify NTree recursor type
-env.check_type(env.infer_type(Rec(NTree)), Sort(1))
+env.check_type(env.infer_type(env.elaborate(Rec(NTree))), Sort(1))
 
 # Test: negative occurrence of Self should fail positivity check
 try:

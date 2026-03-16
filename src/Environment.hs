@@ -1,5 +1,3 @@
-{-# LANGUAGE UndecidableInstances #-}
-
 module Environment where
 
 import Control.Monad (unless)
@@ -15,7 +13,7 @@ import Data.Map qualified as Map
 import Data.String.Interpolate (i)
 import Streaming (Stream, Of)
 import Streaming.Prelude qualified as S
-import Text.PrettyPrint.HughesPJ (render, sep)
+import Text.PrettyPrint qualified as PP
 import Unbound.Generics.LocallyNameless qualified as Unbound
 import Unbound.Generics.LocallyNameless.Bind qualified as Unbound
 import Unbound.Generics.LocallyNameless.Internal.Fold qualified as Unbound
@@ -64,12 +62,14 @@ traceTcMonad env stream = go stream 0 emptyTcState where
       Right ((Left result, _), _) -> (Right result, [])
       Right ((Right (trace, restStream), newFreshState), newTcState) ->
         second (trace :) (go restStream newFreshState newTcState)
-  emptyTcState = TcState 0 Map.empty Map.empty
+  emptyTcState = TcState 0 Map.empty Map.empty 0 Map.empty
 
 data TcState = TcState {
   mvarCounter :: Int,
   mvarTypes :: Map Int Type,
-  mvarSolutions :: Map Int Term
+  mvarSolutions :: Map Int Term,
+  levelMVarCounter :: Int,
+  levelMVarSolutions :: Map Int Level
 }
 
 -- Type checking environment with data types, declarations, and local bindings
@@ -79,17 +79,44 @@ data LocalContext = LocalContext {
 }
 
 data DataTypeInfo = DataTypeInfo {
+  univParams :: [UnivParamName],
   signature :: Type,
   ctors :: [(CtorName, Type)],
+  recursorUnivParam :: UnivParamName,
   recursorType :: Type
+}
+
+data DeclInfo = DeclInfo {
+  univParams :: [UnivParamName],
+  type' :: Type,
+  body :: Term
 }
 
 data Env = Env {
   datatypes :: Map DataTypeName DataTypeInfo,
-  decls :: Map String (Type, Term),
+  decls :: Map String DeclInfo,
   localCtx :: LocalContext,
-  dataTypeBeingDeclared :: Maybe (DataTypeName, Type)
+  dataTypeBeingDeclared :: Maybe (DataTypeName, ([UnivParamName], Type))
 }
+
+newLevelMVar :: TcMonad Level
+newLevelMVar = do
+  tcState <- State.get
+  let id = tcState.levelMVarCounter
+  State.put $ tcState { levelMVarCounter = id + 1 }
+  return $ LMVar id
+
+lookUpLevelMVarSolution :: Int -> TcMonad (Maybe Level)
+lookUpLevelMVarSolution id = Map.lookup id . (.levelMVarSolutions) <$> State.get
+
+instantiateLevelMVars :: Level -> TcMonad Level
+instantiateLevelMVars = \case
+  Succ level -> Succ <$> instantiateLevelMVars level
+  Max level1 level2 -> Max <$> instantiateLevelMVars level1 <*> instantiateLevelMVars level2
+  LMVar id -> lookUpLevelMVarSolution id >>= \case
+    Just solvedLevel -> instantiateLevelMVars solvedLevel
+    Nothing -> return $ LMVar id
+  level -> return level
 
 newMVar :: Type -> TcMonad Term
 newMVar type' = do
@@ -115,9 +142,11 @@ lookUpMVarSolution id = Map.lookup id . (.mvarSolutions) <$> State.get
 
 instantiateMVars :: Term -> TcMonad Term
 instantiateMVars term = case term of
+  Sort level -> Sort <$> instantiateLevelMVars level
   MVar id -> lookUpMVarSolution id >>= \case
     Just soln -> instantiateMVars soln
     Nothing -> return term
+  Const constant levels -> Const constant <$> mapM instantiateLevelMVars levels
   App func arg -> App <$> instantiateMVars func <*> instantiateMVars arg
   Lam binderInfo binder -> do
     (paramName, body) <- Unbound.unbind binder
@@ -149,8 +178,24 @@ assignMVar id term = do
   tcState <- State.get
   State.put $ tcState { mvarSolutions = Map.insert id term tcState.mvarSolutions }
 
+levelMVarOccursCheck :: Int -> Level -> Bool
+levelMVarOccursCheck id = \case
+  Succ level -> levelMVarOccursCheck id level
+  Max level1 level2 -> levelMVarOccursCheck id level1 || levelMVarOccursCheck id level2
+  LMVar id2 -> id == id2
+  _ -> False
+
+assignLevelMVar :: Int -> Level -> TcMonad ()
+assignLevelMVar id level = do
+  level <- instantiateLevelMVars level
+  if levelMVarOccursCheck id level
+    then err [DS [i|Occurs check failed for ?u#{id} in|], DD level]
+    else do
+      tcState <- State.get
+      State.put $ tcState { levelMVarSolutions = Map.insert id level tcState.levelMVarSolutions }
+
 -- Look up a global declaration by name
-lookUpDecl :: TC m => String -> m (Maybe (Type, Term))
+lookUpDecl :: TC m => String -> m (Maybe DeclInfo)
 lookUpDecl var = asks $ Map.lookup var . (.decls)
 
 lookUpLVarType :: TermName -> TcMonad Type
@@ -158,17 +203,40 @@ lookUpLVarType name = asks (Map.lookup name . (.localCtx.locals)) >>= \case
   Just type' -> return type'
   Nothing -> throwError [i|Local variable #{ppr name} not found|]
 
-lookUpGVarType :: String -> TcMonad Type
-lookUpGVarType name = asks (Map.lookup name . (.decls)) >>= \case
-  Just (type', _) -> return type'
-  Nothing -> throwError [i|Global variable #{name} not found|]
+-- Look up a data type definition by name
+lookUpDataTypeInfo :: TC m => DataTypeName -> m DataTypeInfo
+lookUpDataTypeInfo typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
+  Just dataTypeInfo -> return dataTypeInfo
+  Nothing -> asks (.dataTypeBeingDeclared) >>= \case
+    Just _ -> throwError [i|Definition of data type #{typeName} not found|]
+    Nothing -> throwError [i|Data type #{typeName} not found|]
 
-lookUpConstType :: Const -> TcMonad Type
-lookUpConstType = \case
-  GVar name -> lookUpGVarType name
-  DataType typeName -> lookUpTypeOfDataType typeName
-  Ctor typeName ctorName -> lookUpCtorType (typeName, ctorName)
-  Rec typeName -> lookUpRecursorType typeName
+-- Look up the type signature of a data type
+lookUpDataType :: DataTypeName -> TcMonad ([UnivParamName], Type)
+lookUpDataType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
+  Just dataTypeInfo -> return (dataTypeInfo.univParams, dataTypeInfo.signature)
+  Nothing -> asks (.dataTypeBeingDeclared) >>= \case
+    Just (name, info) | name == typeName -> return info
+    _ -> throwError [i|Data type #{typeName} not found|]
+
+-- Look up the type of a constructor
+lookUpCtor :: TC m => DataTypeName -> CtorName -> m ([UnivParamName], Type)
+lookUpCtor typeName ctorName = do
+  DataTypeInfo univParams _ ctors _ _ <- lookUpDataTypeInfo typeName
+  case lookup ctorName ctors of
+    Nothing -> throwError [i|Constructor #{ctorName} not found in data type #{typeName}|]
+    Just ctorType -> return (univParams, ctorType)
+
+lookUpConst :: Const -> TcMonad ([UnivParamName], Type)
+lookUpConst = \case
+  GVar name -> lookUpDecl name >>= \case
+    Just (DeclInfo univParams type' _) -> return (univParams, type')
+    Nothing -> throwError [i|Global variable #{name} not found|]
+  DataType typeName -> lookUpDataType typeName
+  Ctor typeName ctorName -> lookUpCtor typeName ctorName
+  Rec typeName -> do
+    DataTypeInfo univParams _ _ recursorUnivParam recursorType <- lookUpDataTypeInfo typeName
+    return (recursorUnivParam : univParams, recursorType)
 
 -- Add a local variable to the environment
 addLocal :: TermName -> Type -> TcMonad a -> TcMonad a
@@ -187,40 +255,18 @@ addDataType name dataTypeInfo monad = asks (Map.lookup name . (.datatypes)) >>= 
   Just _ -> throwError [i|Name conflict when declaring data type #{name}|]
 
 -- Add a global declaration to the environment
-addDecl :: String -> Type -> Term -> TcMonad a -> TcMonad a
-addDecl var type' def monad = asks (Map.lookup var . (.decls)) >>= \case
-  Nothing -> flip local monad $ \env -> env { decls = Map.insert var (type', def) env.decls }
+addDecl :: String -> DeclInfo -> TcMonad a -> TcMonad a
+addDecl var declInfo monad = asks (Map.lookup var . (.decls)) >>= \case
+  Nothing -> flip local monad $ \env -> env { decls = Map.insert var declInfo env.decls }
   Just _ -> throwError [i|Name conflict when declaring variable #{var}|]
-
--- Look up a data type definition by name
-lookUpDataType :: TC m => DataTypeName -> m DataTypeInfo
-lookUpDataType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
-  Just dataTypeDef -> return dataTypeDef
-  Nothing -> asks (.dataTypeBeingDeclared) >>= \case
-    Just _ -> throwError [i|Definition of data type #{typeName} not found|]
-    Nothing -> throwError [i|Data type #{typeName} not found|]
-
--- Look up the type signature of a data type
-lookUpTypeOfDataType :: DataTypeName -> TcMonad Type
-lookUpTypeOfDataType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
-  Just dataTypeInfo -> return dataTypeInfo.signature
-  Nothing -> asks (.dataTypeBeingDeclared) >>= \case
-    Just (name, typeOfDataType) | name == typeName -> return typeOfDataType
-    _ -> throwError [i|Data type #{typeName} not found|]
 
 lookUpRecursorType :: DataTypeName -> TcMonad Type
 lookUpRecursorType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
   Just dataTypeInfo -> return dataTypeInfo.recursorType
   Nothing -> throwError [i|Data type #{typeName} not found|]
 
--- Look up the type of a constructor
-lookUpCtorType :: TC m => (DataTypeName, CtorName) -> m Type
-lookUpCtorType (typeName, ctorName) = do
-  dataTypeInfo <- lookUpDataType typeName
-  case lookup ctorName dataTypeInfo.ctors of
-    Nothing -> throwError [i|Constructor #{ctorName} not found in data type #{typeName}|]
-    Just ctorType -> return ctorType
-
 -- | Throw an error
-err :: TC m => Disp a => [a] -> m b
-err d = throwError $ render $ sep $ map disp d
+err :: TC m => [D] -> m b
+err messages = throwError $ PP.render $ PP.sep $ flip map messages $ \case
+  DS s -> PP.text s
+  DD d -> PP.nest 2 $ disp d

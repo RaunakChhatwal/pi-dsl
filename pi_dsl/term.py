@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import functools
 from typing import overload
 from .base import init_tuple, Int, List, String, Tuple
@@ -45,6 +45,107 @@ class Term():
 
 # Type alias: types are just terms in a dependently-typed language
 type Type = Term
+
+type IntoLevel = int | Level
+
+@dataclass
+class Level:
+    inner: int | str | LevelMVar | Offset | Max = field(init=False, repr=False, compare=False)
+
+    def __init__(self, inner: int | str | LevelMVar | Offset | Max):
+        self.inner = inner
+
+    @staticmethod
+    def fr0m(level: IntoLevel) -> Level:
+        match level:
+            case Level():
+                return level
+            case _:
+                return Level(level)
+
+    def binding(self) -> bindings.Level:
+        match self.inner:
+            case int(n):
+                binding = bindings.Level(bindings.Level.KIND_ZERO)
+                for _ in range(n):
+                    binding = bindings.Level.init_succ(binding)
+                return binding
+            case str(param):
+                return bindings.Level.init_param(String(param))
+            case _:
+                return self.inner.binding()
+
+    @staticmethod
+    def from_binding(binding: bindings.Level) -> Level:
+        match binding.kind:
+            case bindings.Level.KIND_ZERO:
+                return Level(0)
+
+            case bindings.Level.KIND_PARAM:
+                return Level(str(binding.get_param()))
+
+            case bindings.Level.KIND_L_M_VAR:
+                return LevelMVar(int(binding.get_l_m_var()))
+
+            case bindings.Level.KIND_SUCC:
+                base = binding.get_succ()
+                offset = 1
+                while base.kind == bindings.Level.KIND_SUCC:
+                    base = base.get_succ()
+                    offset += 1
+
+                return Offset(Level.from_binding(base), offset)
+
+            case bindings.Level.KIND_MAX:
+                def flatten_max_args(binding: bindings.Level) -> list[Level]:
+                    match binding.kind:
+                        case bindings.Level.KIND_MAX:
+                            arg1, arg2 = binding.get_max()
+                            return flatten_max_args(arg1) + flatten_max_args(arg2)
+                        case _:
+                            return [Level.from_binding(binding)]
+
+                return Max(*flatten_max_args(binding))
+
+@dataclass
+class LevelMVar(Level):
+    id: int
+
+    def __post_init__(self):
+        self.inner = self
+
+    def binding(self) -> bindings.Level:
+        return bindings.Level.init_l_m_var(Int(self.id))
+
+@dataclass
+class Offset(Level):
+    base: Level
+    offset: int
+
+    def __post_init__(self):
+        self.inner = self
+
+    def binding(self) -> bindings.Level:
+        binding = self.base.binding()
+        for _ in range(self.offset):
+            binding = bindings.Level.init_succ(binding)
+
+        return binding
+
+@dataclass
+class Max(Level):
+    levels: list[Level]
+
+    def __init__(self, *levels: IntoLevel):
+        assert len(levels) >= 2
+        self.levels = [Level.fr0m(level) for level in levels]
+        self.inner = self
+
+    def binding(self) -> bindings.Level:
+        acc = self.levels[0].binding()
+        for level in self.levels[1:]:
+            acc = bindings.Level.init_max(acc, level.binding())
+        return acc
 
 # Annotated term: a term with an explicit type annotation
 @dataclass
@@ -127,44 +228,57 @@ class IVar(Var):
     # def __class_getitem__(cls, hint: Type) -> Hint:
     #     return Hint(Var, hint, implicit=True)
 
+@dataclass
+class Const(Term):
+    level_args: list[IntoLevel] = field(default_factory=lambda: [], kw_only=True)
+
+    def const_binding(self) -> bindings.Const:
+        raise NotImplementedError
+
+    def binding(self) -> bindings.Term:
+        level_args = [Level.fr0m(level).binding() for level in self.level_args]
+        return bindings.Term.init_const(self.const_binding(), List[bindings.Level](*level_args))
+
 # Constructor: a named constructor for an inductive datatype
 @dataclass
-class Ctor(Term):
+class Ctor(Const):
     name: str
     datatype: DataType
     signature: Type
 
     # Convert constructor to Haskell binding
-    def binding(self) -> bindings.Term:
-        return bindings.Term.init_const(
-            bindings.Const.init_ctor(String(self.datatype.name), String(self.name)))
+    def const_binding(self) -> bindings.Const:
+        return bindings.Const.init_ctor(String(self.datatype.name), String(self.name))
 
 # Inductive datatype with a name, signature, and list of constructors
 @dataclass
-class DataType(Term):
+class DataType(Const):
     name: str
+    univ_params: list[str]
     signature: Type
     ctors: list[Ctor]
 
     # Convert datatype reference to Haskell binding
-    def binding(self) -> bindings.Term:
-        return bindings.Term.init_const(bindings.Const.init_data_type(String(self.name)))
+    def const_binding(self) -> bindings.Const:
+        return bindings.Const.init_data_type(String(self.name))
 
     # Convert datatype definition to a Haskell Entry binding
     def entry_binding(self) -> Entry:
-        ctor_defs = List[Tuple[String, bindings.Type]](
+        name = String(self.name)
+        univ_params = \
+            bindings.List[bindings.UnivParamName](*[String(param) for param in self.univ_params])
+        ctors = List[Tuple[String, bindings.Type]](
             *[init_tuple(String(ctor.name), ctor.signature.binding()) for ctor in self.ctors])
-        return bindings.Entry.init_data(
-            String(self.name), self.signature.binding(), ctor_defs)
+        return bindings.Entry.init_data(name, univ_params, self.signature.binding(), ctors)
 
 # Global variable: a reference to a top-level declaration by name
 @dataclass
-class Global(Term):
+class Global(Const):
     name: str
 
     # Convert global reference to Haskell binding
-    def binding(self) -> bindings.Term:
-        return bindings.Term.init_const(bindings.Const.init_g_var(String(self.name)))
+    def const_binding(self) -> bindings.Const:
+        return bindings.Const.init_g_var(String(self.name))
 
 # Lambda abstraction with one or more bound variables
 @dataclass
@@ -213,25 +327,24 @@ class Pi(Term):
 
 # Recursor: the elimination principle for an inductive datatype
 @dataclass
-class Rec(Term):
+class Rec(Const):
     datatype: DataType
 
     # Convert recursor to Haskell binding
-    def binding(self) -> bindings.Term:
-        return bindings.Term.init_const(bindings.Const.init_rec(String(self.datatype.name)))
+    def const_binding(self) -> bindings.Const:
+        return bindings.Const.init_rec(String(self.datatype.name))
 
 # Sort: universe level (Set = Sort(0), Set1 = Sort(1), etc.)
 @dataclass
 class Sort(Term):
-    level: int
+    level: Level
+
+    def __init__(self, level: IntoLevel):
+        self.level = Level.fr0m(level)
 
     # Convert sort to Haskell binding with nested Succ levels
     def binding(self) -> bindings.Term:
-        level_binding = bindings.Level(bindings.Level.KIND_ZERO)
-        assert self.level >= 0
-        for _ in range(self.level):
-            level_binding = bindings.Level.init_succ(level_binding)
-        return bindings.Term.init_sort(level_binding)
+        return bindings.Term.init_sort(self.level.binding())
 
 # Set is the base universe (Type₀)
 Set = Sort(0)

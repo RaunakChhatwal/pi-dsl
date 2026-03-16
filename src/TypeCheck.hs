@@ -1,6 +1,6 @@
 module TypeCheck where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless, when, replicateM)
 import Control.Monad.Extra (whenM)
 import Control.Monad.Reader (asks, local, ask)
 import Control.Monad.Trans (lift)
@@ -26,9 +26,14 @@ elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
       go func funcType = whnf funcType >>= \case
         Pi Implicit paramType binder -> do
           mvar <- newMVar paramType
-          go (App func mvar) (Unbound.instantiate binder [mvar])
+          go (App func mvar) $ Unbound.instantiate binder [mvar]
         Pi Explicit paramType _ -> App func <$> elaborateAgainst arg paramType
         _ -> err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
+
+  Const constant levels -> do
+    (univParams, _) <- lookUpConst constant
+    levelMVars <- replicateM (length univParams - length levels) newLevelMVar
+    return $ Const constant $ levels ++ levelMVars
 
   Pi binderInfo paramType binder -> do
     paramType <- elaborate paramType
@@ -127,7 +132,7 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
     (paramName, returnType) <- Unbound.unbind binder
     paramSortLevel <- ensureType paramType
     returnSortLevel <- addLocal paramName paramType $ ensureType returnType
-    return $ Sort $ maxLevel paramSortLevel returnSortLevel
+    return $ Sort $ Max paramSortLevel returnSortLevel
 
   App func arg -> do
     funcType <- inferType func
@@ -142,7 +147,11 @@ inferType term = traceM "inferType" [ppr term] ppr $ case term of
     checkType term type'
     return type'
 
-  Const constant -> lookUpConstType constant
+  Const constant levels -> do
+    (univParams, type') <- lookUpConst constant
+    unless (length levels == length univParams) $
+      throwError [i|Expected #{length univParams} universe arguments for #{ppr term}|]
+    return $ substLevels (zip univParams levels) type'
 
 -- Check that a term has the expected type
 checkType :: Term -> Type -> TcMonad ()
@@ -163,26 +172,37 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
       inferredType <- inferType term
       unify inferredType type'
 
+checkClosedLevel :: [UnivParamName] -> Level -> TcMonad ()
+checkClosedLevel univParams = \case
+  Zero -> return ()
+  Succ level -> checkClosedLevel univParams level
+  Max level1 level2 -> checkClosedLevel univParams level1 >> checkClosedLevel univParams level2
+  Param univParamName -> unless (univParamName `elem` univParams) $
+    throwError [i|Closed check failed: free universe parameter #{univParamName}|]
+  LMVar id -> throwError [i|Closed check failed: unresolved universe meta ?u#{id}|]
+
 -- Verify that a term has no free/meta variables
-checkClosed :: Term -> TcMonad ()
-checkClosed (LVar var) = when (Unbound.isFreeName var) $
-  throwError [i|Closed check failed: free local #{ppr var}|]
-checkClosed (MVar id) = throwError [i|Closed check failed: unresolved meta ?#{id}|]
-checkClosed (Lam _ (Unbound.B _ body)) = checkClosed body
-checkClosed (App func arg) = checkClosed func >> checkClosed arg
-checkClosed (Pi _ paramType (Unbound.B _ returnType)) =
-  checkClosed paramType >> checkClosed returnType
-checkClosed (Ann term type') = checkClosed term >> checkClosed type'
-checkClosed _ = return ()
+checkClosed :: [UnivParamName] -> Term -> TcMonad ()
+checkClosed univParams = \case
+  Sort level -> checkClosedLevel univParams level
+  LVar var -> when (Unbound.isFreeName var) $
+    throwError [i|Closed check failed: free local #{ppr var}|]
+  MVar id -> throwError [i|Closed check failed: unresolved meta ?#{id}|]
+  Const _ levels -> mapM_ (checkClosedLevel univParams) levels
+  Lam _ (Unbound.B _ body) -> checkClosed univParams body
+  App func arg -> checkClosed univParams func >> checkClosed univParams arg
+  Pi _ paramType (Unbound.B _ returnType) ->
+    checkClosed univParams paramType >> checkClosed univParams returnType
+  Ann term type' -> checkClosed univParams term >> checkClosed univParams type'
 
 -- Type-check a single top-level entry and return its elaborated, instantiated form
 addEntry :: Entry -> TcMonad Env
 addEntry entry = traceM "addEntry" [ppr entry] (const "") $ case entry of
-  Decl var type' term -> do
+  Decl var univParams type' term -> do
     whenM (isJust <$> lookUpDecl var) $ throwError [i|Name conflict when declaring variable #{var}|]
 
-    checkClosed type'
-    checkClosed term
+    checkClosed univParams type'
+    checkClosed univParams term
 
     type' <- elaborate type'
     _ <- ensureType type'
@@ -191,29 +211,34 @@ addEntry entry = traceM "addEntry" [ppr entry] (const "") $ case entry of
 
     type' <- instantiateMVars type'
     term <- instantiateMVars term
-    checkClosed type'
-    checkClosed term
+    checkClosed univParams type'
+    checkClosed univParams term
 
-    addDecl var type' term ask
+    addDecl var (DeclInfo univParams type' term) ask
 
-  Data typeName signature ctors -> do
+  Data typeName univParams signature ctors -> do
     whenM (asks $ Map.member typeName . (.datatypes)) $
       throwError [i|Name conflict when declaring data type #{typeName}|]
 
-    checkClosed signature
-    mapM_ (checkClosed . snd) ctors
+    checkClosed univParams signature
+    mapM_ (checkClosed univParams . snd) ctors
 
     signature <- elaborate signature
-    let addSelfToEnv env = env { dataTypeBeingDeclared = Just (typeName, signature) }
+    let addSelfToEnv env = env { dataTypeBeingDeclared = Just (typeName, (univParams, signature)) }
     ctors <- sequence
       [(ctorName,) <$> local addSelfToEnv (elaborate ctorType) | (ctorName, ctorType) <- ctors]
-    checkDataTypeDecl typeName signature ctors
+    checkDataTypeDecl typeName signature ctors addSelfToEnv
 
     signature <- instantiateMVars signature
     ctors <- sequence [(ctorName,) <$> instantiateMVars ctorType | (ctorName, ctorType) <- ctors]
-    recursorType <- synthesizeRecursorType typeName signature ctors
-    checkClosed signature
-    mapM_ (checkClosed . snd) ctors
-    checkClosed recursorType
+    checkClosed univParams signature
+    mapM_ (checkClosed univParams . snd) ctors
 
-    addDataType typeName (DataTypeInfo signature ctors recursorType) ask
+    let candidateNames = ("u" :) $ map (\i -> "u" ++ show i) [1 :: Int ..]
+    let recursorUnivParam = head $ filter (not . (`elem` univParams)) candidateNames
+    let motiveReturnType = Sort $ Param recursorUnivParam
+    recursorType <- synthesizeRecursorType typeName univParams signature ctors motiveReturnType
+    checkClosed (recursorUnivParam : univParams) recursorType
+
+    let dataTypeInfo = DataTypeInfo univParams signature ctors recursorUnivParam recursorType
+    addDataType typeName dataTypeInfo ask

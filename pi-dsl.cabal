@@ -21,6 +21,7 @@ common shared-properties
     NoFieldSelectors
     OverloadedRecordDot
     ParallelListComp
+    UndecidableInstances
 
   ghc-options: -Wall -Wno-name-shadowing -Wno-orphans -fno-ignore-asserts
   build-depends:

@@ -1,4 +1,6 @@
 import inspect
+# from itertools import chain
+# from copy import copy
 from typing import Any, Callable
 from . import bindings
 from .env import Env
@@ -43,9 +45,10 @@ def remove_stub(term: Term, self: DataType) -> Term:
             return Ann(remove_stub(body, self), remove_stub(hint, self))
         case App(func, arg):
             return App(remove_stub(func, self), remove_stub(arg, self))
-        case Ctor(name, DataType(type_name, type_signature, ctors), signature):
-            datatype = DataType(type_name, remove_stub(type_signature, self), ctors)
-            return Ctor(name, datatype, remove_stub(signature, self))
+        # case Ctor(name, datatype, signature):
+        #     datatype = copy(datatype)
+        #     datatype.signature = remove_stub(datatype.signature, self)
+        #     return Ctor(name, datatype, remove_stub(signature, self))
         case Lam(vars, body):
             return Lam(vars, remove_stub(body, self))
         case Pi(params, return_type):
@@ -56,17 +59,63 @@ def remove_stub(term: Term, self: DataType) -> Term:
                     return Pi(params, return_type)
                 case param:
                     return Pi(remove_stub_from_param(param, self), return_type)
-        case DataType() | Global() | Sort() | Rec() | Var():
+        case Const() | Sort() | Var(): # DataType() | Global() | Sort() | Rec() | Var():
             return term
         case _:
             assert isinstance(term, SelfSingleton)
             return self
 
+def infer_univ_params_from_level(level: Level) -> set[str]:
+    match level.inner:
+        case int() | LevelMVar():
+            return set()
+        case str(name):
+            return {name}
+        case Offset(base, _):
+            return infer_univ_params_from_level(base)
+        case Max(levels):
+            univ_params: set[str] = set()
+            for level in levels:
+                univ_params |= infer_univ_params_from_level(level)
+            return univ_params
+
+def infer_univ_params(term: Term) -> set[str]:
+    match term:
+        case Ann(term, hint):
+            return infer_univ_params(term) | infer_univ_params(hint)
+        case App(func, arg):
+            return infer_univ_params(func) | infer_univ_params(arg)
+        case Lam(_, body):
+            return infer_univ_params(body)
+        case Pi(params, return_type):
+            match params:
+                case list() as params:
+                    pass
+                case param:
+                    params = [param]
+
+            univ_params: set[str] = set()
+            for _, param_type, _ in map(raw_param, params):
+                univ_params |= infer_univ_params(param_type)
+
+            return univ_params | infer_univ_params(return_type)
+        case Sort(level):
+            return infer_univ_params_from_level(level)
+        case Const(level_args=level_args):
+            univ_params: set[str] = set()
+            for level in level_args:
+                univ_params |= infer_univ_params_from_level(Level.fr0m(level))
+            return univ_params
+        case _:
+            return set()
+
 # Decorator for defining inductive datatypes with automatic constructor generation
 def datatype(env: Env, signature: Type=Set):
     def decorator[T: DataTypeMeta](cls: T) -> T:
         cls.signature = signature
+        # cls.univ_params = []
         cls.ctors = []
+        cls.level_args = []
 
         for class_var, hint in cls.__dict__.get("__annotations__", {}).items():
             if not isinstance(hint, Hint):
@@ -76,6 +125,11 @@ def datatype(env: Env, signature: Type=Set):
             ctor = Ctor(class_var, cls, remove_stub(hint.hint, cls))
             setattr(cls, class_var, ctor)
             cls.ctors.append(ctor)
+
+        univ_params = infer_univ_params(cls.signature)
+        for ctor in cls.ctors:
+            univ_params |= infer_univ_params(ctor.signature)
+        cls.univ_params = sorted(univ_params)
 
         env.add_datatype(cls)
         return cls
@@ -103,10 +157,12 @@ def decl(env: Env):
                 params.append(I(Var(name), param.annotation.hint))
             else:
                 params.append((Var(name), param.annotation.hint))
-        signature = Pi(params, func_signature.return_annotation.hint)
+        type_ = Pi(params, func_signature.return_annotation.hint)
 
         var = Global(func.__name__)
-        env.declare(var, signature, lam(func))
+        body = lam(func)
+        univ_params = sorted(infer_univ_params(type_) | infer_univ_params(body))
+        env.declare(var, univ_params, type_, body)
         return var
 
     return decorator
