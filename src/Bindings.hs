@@ -75,11 +75,7 @@ type Field = (String, TypeBinding)
 data Binding =
   Function String [(String, TypeBinding)] TypeBinding
   | TypeAlias String TypeBinding
-  | TaggedUnion {
-    name :: String,
-    arity :: Int,
-    ctors :: [Either String Field]
-  }
+  | TaggedUnion String Int [Either String Field]
 
 -- Type parameter names for generic type resolution
 type TypeParamName = TH.Name

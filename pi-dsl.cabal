@@ -23,7 +23,7 @@ common shared-properties
     ParallelListComp
     UndecidableInstances
 
-  ghc-options: -Wall -Wno-name-shadowing -Wno-orphans -fno-ignore-asserts
+  ghc-options: -Wall -Wno-name-shadowing -Wno-orphans -Wno-x-partial -Wno-incomplete-uni-patterns -fno-ignore-asserts
   build-depends:
     base,
     mtl,

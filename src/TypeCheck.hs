@@ -1,6 +1,6 @@
 module TypeCheck where
 
-import Control.Monad (unless, when, replicateM)
+import Control.Monad (replicateM, unless, when)
 import Control.Monad.Extra (whenM)
 import Control.Monad.Reader (asks, local, ask)
 import Control.Monad.Trans (lift)

@@ -39,14 +39,33 @@ class Term():
     def __rrshift__(self, other: Param) -> Term:
         return Pi(other, self)
 
+    def assert_sibling(self, other: Term):
+        message = (
+            f"{type(other).__name__} and {type(self).__name__} have a parent-child relationship. "
+            "Operations on them can be reflected "
+            "(https://docs.python.org/3/reference/datamodel.html#id18) "
+            "which is problematic in pi-dsl because reflected operations are not equivalent. "
+            "Therefore it is disallowed."
+        )
+
+        if (issubclass(type(self), type(other)) or issubclass(type(other), type(self))) and \
+                type(self) is not type(other):
+            raise Exception(message)
+
     # Syntactic sugar for addition using the global "add" function
     def __add__(self, other: Term) -> Term:
+        self.assert_sibling(other)
         return Global("add")(self, other)
+
+    # Syntactic sugar for propositional equality using the global "Eq" type
+    def __eq__(self, other: Term) -> Term: # type: ignore
+        self.assert_sibling(other)
+        raise NotImplementedError
 
 # Type alias: types are just terms in a dependently-typed language
 type Type = Term
 
-type IntoLevel = int | Level
+type IntoLevel = int | str | Level
 
 @dataclass
 class Level:
@@ -72,7 +91,7 @@ class Level:
                 return binding
             case str(param):
                 return bindings.Level.init_param(String(param))
-            case _:
+            case Level():
                 return self.inner.binding()
 
     @staticmethod
@@ -148,7 +167,7 @@ class Max(Level):
         return acc
 
 # Annotated term: a term with an explicit type annotation
-@dataclass
+@dataclass(eq=False)
 class Ann(Term):
     term: Term
     hint: Type
@@ -158,7 +177,7 @@ class Ann(Term):
         return bindings.Term.init_ann(self.term.binding(), self.hint.binding())
 
 # Application: function application of func to arg
-@dataclass
+@dataclass(eq=False)
 class App(Term):
     func: Term
     arg: Term
@@ -168,10 +187,13 @@ class App(Term):
         return bindings.Term.init_app(self.func.binding(), self.arg.binding())
 
 # Local variable with a name and unique identifier
-@dataclass
-class Var(Term):
+@dataclass(eq=False)
+class Local(Term):
     name: str
     id: int = 0
+
+    def explicit(self) -> bool:
+        raise NotImplementedError
 
     # Convert variable to Haskell binding as a local variable
     def binding(self) -> bindings.Term:
@@ -182,11 +204,19 @@ class Var(Term):
         return bindings.Name[bindings.Term].init_fn(String(self.name), Int(self.id))
 
     # Construct a Var from a Haskell Name binding
-    @staticmethod
-    def from_binding(name: TermName) -> Var:
-        return Var(str(name.get_fn()[0]), int(name.get_fn()[1]))
+    @classmethod
+    def from_binding(cls, name: TermName):
+        return cls(str(name.get_fn()[0]), int(name.get_fn()[1]))
 
-@dataclass
+class Var(Local):
+    def explicit(self) -> bool:
+        return True
+
+class IVar(Local):
+    def explicit(self) -> bool:
+        return False
+
+@dataclass(eq=False)
 class MVar(Term):
     id: int
 
@@ -195,48 +225,49 @@ class MVar(Term):
         return bindings.Term.init_m_var(Int(self.id))
 
 # Hole variable representing an unnamed/inferred position
-hole = Var("_")
+# hole = Var("_")
 
 @dataclass
 class IParam:
-    var: Var
+    var: Local
     param_type: Type
 
     @overload
     def __init__(self, param_name_or_type: Type) -> None: ...
 
     @overload
-    def __init__(self, param_name_or_type: Var, param_type: Type) -> None: ...
+    def __init__(self, param_name_or_type: Local, param_type: Type) -> None: ...
 
-    def __init__(self, param_name_or_type: Var | Type, param_type: Type | None = None) -> None:
-        if param_type is None:
-            self.var = hole
-            self.param_type = param_name_or_type
-        else:
-            assert isinstance(param_name_or_type, Var)
-            self.var = param_name_or_type
-            self.param_type = param_type
+    def __init__(self, param_name_or_type: Local | Type, param_type: Type | None = None) -> None:
+        match param_type:
+            case None:
+                self.var = Local("_", False)
+                self.param_type = param_name_or_type
+            case Term():
+                assert isinstance(param_name_or_type, Local)
+                self.var = param_name_or_type
+                self.param_type = param_type
 
 # Param is either a type (for non-dependent arrows) or a (name, type) pair
-type Param = Type | tuple[Var, Type] | IParam
+type Param = Type | tuple[Local, Type] | IParam
 
 # Extract the (Var, Type, implicit) triple from a Param, using hole for unnamed params
-def raw_param(param: Param) -> tuple[Var, Type, bool]:
+def raw_param(param: Param) -> tuple[Local, Type, bool]:
     match param:
         case Term() as param_type:
-            return (hole, param_type, False)
+            return (Local("_", True), param_type, False)
         case IParam(var, param_type):
             return (var, param_type, True)
         case (var, param_type):
             return (var, param_type, False)
 
 # Marks a parameter binding as implicit (for implicit-arg insertion)
-class IVar(Var):
-    pass
-    # def __class_getitem__(cls, hint: Type) -> Hint:
-    #     return Hint(Var, hint, implicit=True)
+# class IVar(Var):
+#     pass
+#     # def __class_getitem__(cls, hint: Type) -> Hint:
+#     #     return Hint(Var, hint, implicit=True)
 
-@dataclass
+@dataclass(eq=False)
 class Const(Term):
     level_args: list[IntoLevel] = field(default_factory=lambda: [], kw_only=True)
 
@@ -248,7 +279,7 @@ class Const(Term):
         return bindings.Term.init_const(self.const_binding(), List[bindings.Level](*level_args))
 
 # Constructor: a named constructor for an inductive datatype
-@dataclass
+@dataclass(eq=False)
 class Ctor(Const):
     name: str
     datatype: DataType
@@ -259,7 +290,7 @@ class Ctor(Const):
         return bindings.Const.init_ctor(String(self.datatype.name), String(self.name))
 
 # Inductive datatype with a name, signature, and list of constructors
-@dataclass
+@dataclass(eq=False)
 class DataType(Const):
     name: str
     univ_params: list[str]
@@ -280,7 +311,7 @@ class DataType(Const):
         return bindings.Entry.init_data(name, univ_params, self.signature.binding(), ctors)
 
 # Global variable: a reference to a top-level declaration by name
-@dataclass
+@dataclass(eq=False)
 class Global(Const):
     name: str
 
@@ -289,9 +320,9 @@ class Global(Const):
         return bindings.Const.init_g_var(String(self.name))
 
 # Lambda abstraction with one or more bound variables
-@dataclass
+@dataclass(eq=False)
 class Lam(Term):
-    param_names: Var | list[Var]
+    param_names: Local | list[Local]
     body: Term
 
     # Convert lambda to Haskell binding, nesting multiple binders
@@ -303,16 +334,14 @@ class Lam(Term):
                 param_names = [param_name]
 
         binding = self.body.binding()
-        for param_name in reversed(param_names):
-            if isinstance(param_name, IVar):
-                binder_info = BinderInfo(BinderInfo.KIND_IMPLICIT)
-            else:
-                binder_info = BinderInfo(BinderInfo.KIND_EXPLICIT)
-            binding = bindings.Term.init_lam(binder_info, bind(param_name.name_binding(), binding))
+        for param_var in reversed(param_names):
+            binder_info = BinderInfo(\
+                BinderInfo.KIND_EXPLICIT if param_var.explicit() else BinderInfo.KIND_IMPLICIT)
+            binding = bindings.Term.init_lam(binder_info, bind(param_var.name_binding(), binding))
         return binding
 
 # Pi type (dependent function type) with one or more parameters
-@dataclass
+@dataclass(eq=False)
 class Pi(Term):
     params: Param | list[Param]
     return_type: Type
@@ -334,7 +363,7 @@ class Pi(Term):
         return binding
 
 # Recursor: the elimination principle for an inductive datatype
-@dataclass
+@dataclass(eq=False)
 class Rec(Const):
     datatype: DataType
 
@@ -343,7 +372,7 @@ class Rec(Const):
         return bindings.Const.init_rec(String(self.datatype.name))
 
 # Sort: universe level (Set = Sort(0), Set1 = Sort(1), etc.)
-@dataclass
+@dataclass(eq=False)
 class Sort(Term):
     level: Level
 

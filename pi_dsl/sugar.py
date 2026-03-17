@@ -55,7 +55,7 @@ def remove_stub(term: Term, self: DataType) -> Term:
                     return Pi(params, return_type)
                 case param:
                     return Pi(remove_stub_from_param(param, self), return_type)
-        case Const() | Sort() | Var(): # DataType() | Global() | Sort() | Rec() | Var():
+        case Const() | Sort() | Local():
             return term
         case _:
             assert isinstance(term, SelfSingleton)
@@ -133,8 +133,7 @@ def datatype(env: Env, signature: Type=Set):
 
 # Creates a lambda term from a Python function by inspecting its parameter names
 def lam(func: Callable[..., Term]) -> Term:
-    # params = inspect.signature(func).parameters
-    param_vars: list[Var] = [] # [Var(name) for name in params.keys()]
+    param_vars: list[Local] = []
     for name, param in inspect.signature(func).parameters.items():
         if isinstance(param.annotation, Hint) and param.annotation.cls is IVar:
             param_vars.append(IVar(name))
@@ -148,10 +147,12 @@ def decl(env: Env):
         func_signature = inspect.signature(func)
         params: list[Param] = []
         for name, param in func_signature.parameters.items():
-            if param.annotation.cls is IVar:
-                params.append(I(Var(name), param.annotation.hint))
-            else:
+            if param.annotation.cls is Var:
                 params.append((Var(name), param.annotation.hint))
+            elif param.annotation.cls is IVar:
+                params.append(I(IVar(name), param.annotation.hint))
+            else:
+                raise Exception(f"Parameter {name} must be annotated by Var or IVar")
         type_ = Pi(params, func_signature.return_annotation.hint)
 
         var = Global(func.__name__)

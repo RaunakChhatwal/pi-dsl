@@ -50,7 +50,7 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
             return Sort(Level.from_binding(binding.get_sort()))
 
         case bindings.Term.KIND_L_VAR:
-            return Var.from_binding(binding.get_l_var())
+            return Local.from_binding(binding.get_l_var())
 
         case bindings.Term.KIND_M_VAR:
             return MVar(int(binding.get_m_var()))
@@ -62,9 +62,8 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
         case bindings.Term.KIND_LAM:
             binder_info, binder = binding.get_lam()
             param_name, body = unbind(binder).get()
-            var = Var.from_binding(param_name)
-            if binder_info.kind == BinderInfo.KIND_IMPLICIT:
-                var = IVar(var.name, var.id)
+            explicit = binder_info.kind == BinderInfo.KIND_EXPLICIT
+            var = (Var if explicit else IVar).from_binding(param_name)
             return Lam(var, binding_to_term(body, env))
 
         case bindings.Term.KIND_APP:
@@ -75,7 +74,7 @@ def binding_to_term(binding: bindings.Term, env: Env) -> Term:
             binder_info, param_type_binding, binder = binding.get_pi()
             param_name, return_type = unbind(binder).get()
             implicit = binder_info.kind == bindings.BinderInfo.KIND_IMPLICIT
-            var = Var.from_binding(param_name)
+            var = (IVar if implicit else Var).from_binding(param_name)
             param_type = binding_to_term(param_type_binding, env)
             param = IParam(var, param_type) if implicit else (var, param_type)
             return Pi(param, binding_to_term(return_type, env))
