@@ -8,6 +8,19 @@ from textual.widgets.tree import TreeNode
 from pi_dsl.tracing import TraceTree
 
 
+def _format_section_items(items: list[str]) -> str:
+    if len(items) <= 1:
+        return "\n".join(items)
+
+    formatted_items: list[str] = []
+    for item in items:
+        lines = item.splitlines() or [""]
+        first_line, *remaining_lines = lines
+        formatted_items.append("\n".join([f"- {first_line}", *[f"  {line}" for line in remaining_lines]]))
+
+    return "\n".join(formatted_items)
+
+
 # TUI application for interactively exploring type-checking trace trees
 class TraceTui(App[None]):
     # Keybindings for navigation and tree expansion/collapse actions
@@ -91,7 +104,7 @@ class TraceTui(App[None]):
     # Render detailed information about a trace for the details panel
     def _render_details(self, trace: TraceTree) -> str:
         t = trace.trace
-        args = "\n".join(t.args)
+        args = _format_section_items(t.args)
         events = "\n".join(t.events)
         result = t.result or ""
 

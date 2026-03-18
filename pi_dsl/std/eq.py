@@ -4,7 +4,7 @@ from ..term import Ctor, IVar, Lam, Level, Pi, Rec, Set, Sort, Term, Var
 
 # Propositional equality type indexed by a type and two values
 T, a, b = Var("T"), Var("a"), Var("b")
-u = Level("u")
+u, v = Level("u"), Level("v")
 @datatype(env, I(T, Sort(u)) >> ((a, T) >> ((b, T) >> Set)))
 class Eq(metaclass=DataTypeMeta):
     # Reflexivity constructor: any value is equal to itself
@@ -16,28 +16,34 @@ def eq(self: Term, other: Term) -> Term:
 
 Term.__eq__ = eq
 
+# Substitution/transport: if a = b then any property holding at a holds at b
+P = Var("P")
+@decl(env)
+def subst(
+    T: IVar[Sort(u)], a: IVar[T], b: IVar[T], h: Var[a == b], P: Var[T >> Sort(v)], h2: Var[P(a)]
+) -> Term[P(b)]:
+    motive = Lam(T, lam(lambda a, b, _: Pi([(P, T >> Sort(v)), (h2, P(a))], P(b))))
+    return Rec(Eq)(motive, lam(lambda a, P, h: h))(a, b, h, P, h2)
+
 # Symmetry of equality: if a = b then b = a
 @decl(env)
 def sym(T: IVar[Sort(u)], a: IVar[T], b: IVar[T], h: Var[a == b]) -> Term[b == a]:
-    motive = lam(lambda a, b, _: b == a)
-    return Rec(Eq)(motive, Eq.refl, a, b, h)
+    return subst(h, lam(lambda b: b == a), Eq.refl(a))
 
 # Transitivity of equality: if a = b and b = c then a = c
 c = Var("c")
 @decl(env)
 def trans(T: IVar[Sort(u)], a: IVar[T], b: IVar[T], c: IVar[T], h1: Var[a == b], h2: Var[b == c]
 ) -> Term[a == c]:
-    motive = Lam(T, lam(lambda a, b, _: Pi([(c, T), b == c], a == c)))
-    return Rec(Eq)(motive, lam(lambda a, c, h: h))(a, b, h1, c, h2)
+    return subst(h2, lam(lambda c: a == c), h1)
 
 # Congruence: if a = b then f(a) = f(b) for any function f
 U, f = Var("U"), Var("f")
 @decl(env)
 def cong(
-    T: IVar[Sort(u)], U: IVar[Sort("v")], f: Var[T >> U], a: IVar[T], b: IVar[T], h: Var[a == b]
+    T: IVar[Sort(u)], U: IVar[Sort(v)], f: Var[T >> U], a: IVar[T], b: IVar[T], h: Var[a == b]
 ) -> Term[f(a) == f(b)]:
-    motive = Lam(T, lam(lambda a, b, _: Pi([(f, T >> U)], f(a) == f(b))))
-    return Rec(Eq)(motive, lam(lambda a, f: Eq.refl(f(a))))(a, b, h, f)
+    return subst(h, lam(lambda b: f(a) == f(b)), Eq.refl(f(a)))
 
 # Empty type with no constructors (logical falsity)
 @datatype(env)

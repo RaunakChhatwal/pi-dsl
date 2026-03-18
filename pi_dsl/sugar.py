@@ -1,6 +1,4 @@
 import inspect
-# from itertools import chain
-# from copy import copy
 from typing import Any, Callable
 from . import bindings
 from .env import Env

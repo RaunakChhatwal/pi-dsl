@@ -161,4 +161,6 @@ whnf term = traceM "whnf" [ppr term] ppr $ case term of
 
   Ann term _ -> whnf term
 
+  Sort level -> return $ Sort $ normalizeLevel level
+
   term -> return term
