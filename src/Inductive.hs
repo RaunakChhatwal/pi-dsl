@@ -62,7 +62,7 @@ recursorCaseFromCtor ::
 recursorCaseFromCtor motive hole ctorName typeName ctor = whnf >=> \case
   Pi binderInfo paramType binder -> do
     (paramName, returnType) <- Unbound.unbind binder
-    let ctorApplied = if binderInfo == Explicit then App ctor (LVar paramName) else ctor
+    let ctorApplied = App ctor $ LVar paramName
     rest <- recursorCaseFromCtor motive hole ctorName typeName ctorApplied returnType
     runMaybeT (hypothesisTypeFromCtorParam motive typeName paramName paramType) <&> \case
       Nothing -> addParam (binderInfo, paramName, paramType) rest

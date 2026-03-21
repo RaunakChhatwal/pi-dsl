@@ -59,7 +59,6 @@ class Term():
 
     # Syntactic sugar for propositional equality using the global "Eq" type
     def __eq__(self, other: Term) -> Term: # type: ignore
-        self.assert_sibling(other)
         raise NotImplementedError
 
 # Type alias: types are just terms in a dependently-typed language
@@ -260,12 +259,6 @@ def raw_param(param: Param) -> tuple[Local, Type, bool]:
             return (var, param_type, True)
         case (var, param_type):
             return (var, param_type, False)
-
-# Marks a parameter binding as implicit (for implicit-arg insertion)
-# class IVar(Var):
-#     pass
-#     # def __class_getitem__(cls, hint: Type) -> Hint:
-#     #     return Hint(Var, hint, implicit=True)
 
 @dataclass(eq=False)
 class Const(Term):

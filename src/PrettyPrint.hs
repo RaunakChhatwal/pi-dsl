@@ -115,12 +115,14 @@ instance Display (Unbound.Name Term) where
 
 piDocs :: Type -> DispInfo -> [Doc]
 piDocs (Pi binderInfo paramType bind) = Unbound.lunbind bind $ \(paramName, returnType) -> do
-  paramDoc <- if paramName `elem` toListOf Unbound.fv returnType
-    then fmap PP.parens $ (<+>) . (<+> PP.colon) <$> display paramName <*> display paramType
-    else withPrec (levelArrow + 1) (display paramType)
-  paramDoc <- return $ case binderInfo of
-    Implicit -> PP.braces paramDoc
-    Explicit -> paramDoc
+  let isDependent = paramName `elem` toListOf Unbound.fv returnType
+  paramDoc <- case (binderInfo, isDependent) of
+    (Implicit, True) ->
+      fmap PP.braces $ (<+>) . (<+> PP.colon) <$> display paramName <*> display paramType
+    (Implicit, False) -> PP.braces <$> withPrec (levelArrow + 1) (display paramType)
+    (Explicit, True) ->
+      fmap PP.parens $ (<+>) . (<+> PP.colon) <$> display paramName <*> display paramType
+    (Explicit, False) -> withPrec (levelArrow + 1) (display paramType)
   (paramDoc :) <$> piDocs returnType
 piDocs returnType = return <$> display returnType
 

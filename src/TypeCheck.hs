@@ -19,16 +19,7 @@ import Inductive
 
 elaborate :: Term -> TcMonad Term
 elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
-  App func arg -> do
-    func <- elaborate func
-    funcType <- inferType func
-    go func funcType where
-      go func funcType = whnf funcType >>= \case
-        Pi Implicit paramType binder -> do
-          mvar <- newMVar paramType
-          go (App func mvar) $ Unbound.instantiate binder [mvar]
-        Pi Explicit paramType _ -> App func <$> elaborateAgainst arg paramType
-        _ -> err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
+  App _ _ -> uncurry elaborateApps $ unfoldApps term
 
   Const constant levels -> do
     (univParams, _) <- lookUpConst constant
@@ -54,6 +45,23 @@ elaborate term = traceM "elaborate" [ppr term] ppr $ case term of
 
   _ -> return term
 
+elaborateApps :: Term -> [Term] -> TcMonad Term
+elaborateApps func args = do
+  func <- elaborate func
+  funcType <- inferType func
+  elaborateAppSpine func funcType args
+
+elaborateAppSpine :: Term -> Type -> [Term] -> TcMonad Term
+elaborateAppSpine func _ [] = return func
+elaborateAppSpine func funcType (arg : args) = whnf funcType >>= \case
+  Pi Implicit paramType binder -> do
+    mvar <- newMVar paramType
+    elaborateAppSpine (App func mvar) (Unbound.instantiate binder [mvar]) (arg : args)
+  Pi Explicit paramType binder -> do
+    arg <- elaborateAgainst arg paramType
+    elaborateAppSpine (App func arg) (Unbound.instantiate binder [arg]) args
+  _ -> err [DS "Expected function but found ", DD func, DS "of type", DD funcType]
+
 -- Elaborate a term against an expected type
 elaborateAgainst :: Term -> Type -> TcMonad Term
 elaborateAgainst term expectedType = traceM "elaborateAgainst" [ppr term, ppr expectedType] ppr $
@@ -72,7 +80,7 @@ elaborateAgainst term expectedType = traceM "elaborateAgainst" [ppr term, ppr ex
 
         _ -> throwError "Expected explicit parameter but received implicit lambda"
 
-      _ -> err [DS "Lambda expression should have a function type, not", DD expectedType]
+      _ -> elaborate term
 
     _ -> elaborate term
 
@@ -111,7 +119,7 @@ delaborateAgainst term expectedType = traceM "delaborateAgainst" [ppr term, ppr 
           then return body
           else return $ Lam lamBinderInfo $ Unbound.bind paramName body
 
-      _ -> err [DS "Lambda expression should have a function type, not", DD expectedType]
+      _ -> delaborate term
 
     _ -> delaborate term
 
@@ -174,7 +182,10 @@ checkType term type' = traceM "checkType" [ppr term, ppr type'] (const "") $
           (var, body, _, returnType) <- lift $ Unbound.unbind2Plus bodyBinder returnTypeBinder
           addLocal var paramType $ checkType body returnType
         _ -> throwError "Expected explicit parameter but received implicit lambda"
-      _ -> err [DS "Lambda expression should have a function type, not", DD type']
+
+      _ -> do
+        inferredType <- inferType term
+        unify inferredType type'
 
     _ -> do
       inferredType <- inferType term
