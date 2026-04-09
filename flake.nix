@@ -2,12 +2,17 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    home-manager.url = "github:nix-community/home-manager/release-25.11";
+    home-manager.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, home-manager }:
+    let
+      mkPkgs = system: import nixpkgs { inherit system; };
+    in
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = mkPkgs system;
 
         # Build the Haskell core (library + foreign-library) from the Cabal file.
         piDslHs = pkgs.haskellPackages.callCabal2nix "pi-dsl" self {};
@@ -55,5 +60,11 @@
             export PYTHONPATH="$toplevel:$PYTHONPATH"
           '';
         };
-      });
+      })
+    // {
+      homeConfigurations.dev = home-manager.lib.homeManagerConfiguration {
+        pkgs = mkPkgs "x86_64-linux";
+        modules = [ ./home.nix ];
+      };
+    };
 }
