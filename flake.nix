@@ -51,7 +51,7 @@
 
         devShells.default = pkgs.mkShell {
           packages = with pkgs;
-            [ ghc cabal-install haskell-language-server pyright ];
+            [ ghc cabal-install haskell-language-server python3 pyright ];
 
           PYTHONDONTWRITEBYTECODE = 1;
 

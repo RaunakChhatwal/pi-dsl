@@ -1,0 +1,10 @@
+{
+  "id": "nix",
+  "version": "1.0.0",
+  "name": "nix",
+  "description": "Install Nix with the multi-user installer as the dev user.",
+  "documentationURL": "https://nixos.org/download/",
+  "installsAfter": [
+    "ghcr.io/devcontainers/features/common-utils"
+  ]
+}

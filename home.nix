@@ -4,5 +4,5 @@
   home.stateVersion = "25.11";
 
   programs.home-manager.enable = true;
-  home.packages = [ pkgs.neovim ];
+  home.packages = with pkgs; [ neovim ];
 }
