@@ -2,11 +2,17 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    home-manager.url = "github:nix-community/home-manager/release-25.11";
-    home-manager.inputs.nixpkgs.follows = "nixpkgs";
+    home-manager = {
+      url = "github:nix-community/home-manager/release-25.11";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    nix-index-database = {
+      url = "github:nix-community/nix-index-database";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, home-manager }:
+  outputs = { self, nixpkgs, flake-utils, home-manager, nix-index-database }:
     let
       mkPkgs = system: import nixpkgs { inherit system; };
     in
@@ -64,7 +70,7 @@
     // {
       homeConfigurations.dev = home-manager.lib.homeManagerConfiguration {
         pkgs = mkPkgs "x86_64-linux";
-        modules = [ ./home.nix ];
+        modules = [ nix-index-database.homeModules.default ./home.nix ];
       };
     };
 }

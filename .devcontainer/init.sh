@@ -2,15 +2,33 @@ set -eu
 
 sudo sh /workspaces/pi-dsl/.devcontainer/start-nix-daemon.sh
 nix run github:nix-community/home-manager -- switch --flake /workspaces/pi-dsl#dev
-sudo pkill -x nix-daemon
 
-# direnv=/home/dev/.nix-profile/bin/direnv
-#
-# grep -qxF 'export PATH="$HOME/.nix-profile/bin:$PATH"' ~/.bashrc || printf '%s\n' 'export PATH="$HOME/.nix-profile/bin:$PATH"' >> ~/.bashrc
-# grep -qxF "eval \"\$($direnv hook bash)\"" ~/.bashrc || printf '%s\n' "eval \"\$($direnv hook bash)\"" >> ~/.bashrc
-# grep -qxF 'export PS1="\u \W> "' ~/.bashrc || printf '%s\n' 'export PS1="\u \W> "' >> ~/.bashrc
-#
-# cd /workspaces/pi-dsl
-# grep -qxF 'use flake' .envrc || printf '%s\n' 'use flake' >> .envrc
-# $direnv allow
-# $direnv exec . cabal update
+# Materialize workspace-local VS Code config without relying on devcontainer customizations.
+mkdir -p /workspaces/pi-dsl/.vscode
+cat >/workspaces/pi-dsl/.vscode/settings.json <<'EOF'
+{
+  "editor.rulers": [120],
+  "workbench.editor.enablePreview": false,
+  "files.autoSave": "off",
+  "editor.fontSize": 12,
+  "editor.inlayHints.enabled": "off",
+  "python.analysis.extraPaths": ["${workspaceFolder}"]
+}
+EOF
+cat >/workspaces/pi-dsl/.vscode/extensions.json <<'EOF'
+{
+  "recommendations": [
+    "haskell.haskell",
+    "ms-python.python",
+    "mkhl.direnv",
+    "jnoortheen.nix-ide"
+  ]
+}
+EOF
+
+npm config set prefix ~/.local
+npm install -g opencode-ai
+
+echo 'eval "$(direnv hook bash)"' >> ~/.bashrc
+
+sudo pkill -x nix-daemon
