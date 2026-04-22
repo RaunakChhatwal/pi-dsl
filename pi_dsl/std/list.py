@@ -1,6 +1,6 @@
 from .env import env
 from .nat import Nat
-from ..term import Ctor, Level, Pi, Rec, Term, Sort, Var
+from ..term import Ctor, IVar, Level, Pi, Rec, Term, Sort, Var
 from ..sugar import datatype, decl, DataTypeMeta, lam, Self
 
 # Polymorphic list datatype parameterized by element type T
@@ -16,16 +16,16 @@ class List(metaclass=DataTypeMeta):
 
 # Computes the length of a list as a Nat
 @decl(env)
-def length(T: Var[Sort(u)], xs: Var[List(T)]) -> Term[Nat]:
-    motive = lam(lambda T, _: Nat)
-    nil_case = lam(lambda T: Nat.zero)
-    cons_case = lam(lambda T, x, xs, acc: Nat.succ(acc))
-    return Rec(List)(motive, nil_case, cons_case, T, xs)
+def length(T: IVar[Sort(u)], xs: Var[List(T)]) -> Term[Nat]:
+    motive = lam(lambda _: Nat)
+    nil_case = Nat.zero
+    cons_case = lam(lambda x, xs, acc: Nat.succ(acc))
+    return Rec(List)(motive, nil_case, cons_case, xs)
 
 # Applies function f to each element of a list, producing a new list
 @decl(env)
-def map(T: Var[Sort(u)], U: Var[Sort(v)], f: Var[T >> U], xs: Var[List(T)]) -> Term[List(U)]:
-    motive = lam(lambda T, _: (T >> U) >> List(U))
-    nil_case = lam(lambda T, _: List.nil(U))
-    cons_case = lam(lambda T, x, xs, acc, f: List.cons(U, f(x), acc(f)))
-    return Rec(List)(motive, nil_case, cons_case, T, xs, f)
+def map(T: IVar[Sort(u)], U: IVar[Sort(v)], f: Var[T >> U], xs: Var[List(T)]) -> Term[List(U)]:
+    motive = lam(lambda _: (T >> U) >> List(U))
+    nil_case = lam(lambda _: List.nil(U))
+    cons_case = lam(lambda x, xs, acc, f: List.cons(U, f(x), acc(f)))
+    return Rec(List)(motive, nil_case, cons_case, xs, f)

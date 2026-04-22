@@ -125,7 +125,7 @@ delaborateAgainst term expectedType = traceM "delaborateAgainst" [ppr term, ppr 
 
 -- Check that a term is a type and return its universe level
 ensureType :: Term -> TcMonad Level
-ensureType term = inferType term >>= whnf >>= \case
+ensureType term = traceM "ensureType" [ppr term] ppr $ inferType term >>= whnf >>= \case
   Sort level -> return level
   type' -> err [DS "Expected type but got", DD term, DS "with type", DD type']
 
@@ -244,9 +244,10 @@ addEntry entry = traceM "addEntry" [ppr entry] (const "") $ case entry of
 
     signature <- elaborate signature
     let addSelfToEnv env = env { dataTypeBeingDeclared = Just (typeName, (univParams, signature)) }
-    ctors <- sequence
-      [(ctorName,) <$> local addSelfToEnv (elaborate ctorType) | (ctorName, ctorType) <- ctors]
+    ctors <- sequence [(ctorName,) <$> local addSelfToEnv (elaborate ctorType) | (ctorName, ctorType) <- ctors]
     checkDataTypeDecl typeName signature ctors addSelfToEnv
+
+    numParams <- inferNumParams signature $ map snd ctors
 
     signature <- instantiateMVars signature
     ctors <- sequence [(ctorName,) <$> instantiateMVars ctorType | (ctorName, ctorType) <- ctors]
@@ -256,8 +257,8 @@ addEntry entry = traceM "addEntry" [ppr entry] (const "") $ case entry of
     let candidateNames = ("u" :) $ map (\i -> "u" ++ show i) [1 :: Int ..]
     let recursorUnivParam = head $ filter (not . (`elem` univParams)) candidateNames
     let motiveReturnType = Sort $ Param recursorUnivParam
-    recursorType <- synthesizeRecursorType typeName univParams signature ctors motiveReturnType
+    recursorType <- synthesizeRecursorType typeName univParams signature numParams ctors motiveReturnType
     checkClosed (recursorUnivParam : univParams) recursorType
 
-    let dataTypeInfo = DataTypeInfo univParams signature ctors recursorUnivParam recursorType
+    let dataTypeInfo = DataTypeInfo univParams signature numParams ctors recursorUnivParam recursorType
     addDataType typeName dataTypeInfo ask

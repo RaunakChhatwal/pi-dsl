@@ -1,6 +1,6 @@
 from .env import env
 from ..sugar import datatype, decl, DataTypeMeta, I, lam, Self
-from ..term import Ctor, IVar, Lam, Level, Pi, Rec, Set, Sort, Term, Var
+from ..term import Ctor, IVar, Level, Pi, Rec, Set, Sort, Term, Var
 
 # Propositional equality type indexed by a type and two values
 T, a, b = Var("T"), Var("a"), Var("b")
@@ -19,11 +19,9 @@ Term.__eq__ = eq
 # Substitution/transport: if a = b then any property holding at a holds at b
 P = Var("P")
 @decl(env)
-def subst(
-    T: IVar[Sort(u)], a: IVar[T], b: IVar[T], h: Var[a == b], P: Var[T >> Sort(v)], h2: Var[P(a)]
-) -> Term[P(b)]:
-    motive = Lam(T, lam(lambda a, b, _: Pi([(P, T >> Sort(v)), (h2, P(a))], P(b))))
-    return Rec(Eq)(motive, lam(lambda a, P, h: h))(a, b, h, P, h2)
+def subst(T: IVar[Sort(u)], a: IVar[T], b: IVar[T], h: Var[a == b], P: Var[T >> Sort(v)], h2: Var[P(a)]) -> Term[P(b)]:
+    motive = lam(lambda b, _: Pi([(P, T >> Sort(v)), (h2, P(a))], P(b)))
+    return Rec(Eq)(motive, lam(lambda _, h2: h2), h, P, h2)
 
 # Symmetry of equality: if a = b then b = a
 @decl(env)
@@ -33,8 +31,7 @@ def sym(T: IVar[Sort(u)], a: IVar[T], b: IVar[T], h: Var[a == b]) -> Term[b == a
 # Transitivity of equality: if a = b and b = c then a = c
 c = Var("c")
 @decl(env)
-def trans(T: IVar[Sort(u)], a: IVar[T], b: IVar[T], c: IVar[T], h1: Var[a == b], h2: Var[b == c]
-) -> Term[a == c]:
+def trans(T: IVar[Sort(u)], a: IVar[T], b: IVar[T], c: IVar[T], h1: Var[a == b], h2: Var[b == c]) -> Term[a == c]:
     return subst(h2, lam(lambda c: a == c), h1)
 
 # Congruence: if a = b then f(a) = f(b) for any function f
@@ -52,6 +49,6 @@ class Void(metaclass=DataTypeMeta):
 
 # Ex falso quodlibet: from a proof of Void we can derive anything
 @decl(env)
-def exfalso(T: Var[Sort(u)], void: Var[Void]) -> Term[T]:
+def exfalso(T: IVar[Sort(u)], void: Var[Void]) -> Term[T]:
     motive = lam(lambda _: T)
     return Rec(Void)(motive, void)

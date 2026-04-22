@@ -1,5 +1,5 @@
 from .env import env
-from ..term import Ctor, Level, Max, Pi, Rec, Term, Sort, Var
+from ..term import Ctor, IVar, Level, Max, Pi, Rec, Term, Sort, Var
 from ..sugar import datatype, decl, DataTypeMeta, lam, Self
 
 # Sum type: Either A B is either a Left A or a Right B
@@ -18,9 +18,9 @@ class Either(metaclass=DataTypeMeta):
 T = Var("T")
 @decl(env)
 def either(
-    A: Var[Sort(u)], B: Var[Sort(v)], T: Var[Sort(w)], f: Var[A >> T], g: Var[B >> T], e: Var[Either(A, B)]
+    A: IVar[Sort(u)], B: IVar[Sort(v)], T: IVar[Sort(w)], f: Var[A >> T], g: Var[B >> T], e: Var[Either(A, B)]
 ) -> Term[T]:
-    motive = lam(lambda A, B, _: Pi([A >> T, B >> T], T))
-    left_case = lam(lambda A, B, a, f, g: f(a))
-    right_case = lam(lambda A, B, b, f, g: g(b))
-    return Rec(Either)(motive, left_case, right_case, A, B, e, f, g)
+    motive = lam(lambda _: Pi([A >> T, B >> T], T))
+    left_case = lam(lambda a, f, g: f(a))
+    right_case = lam(lambda b, f, g: g(b))
+    return Rec(Either)(motive, left_case, right_case, e, f, g)

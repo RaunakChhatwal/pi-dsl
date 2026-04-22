@@ -19,3 +19,8 @@ include = ["pi_dsl*"]
 
 [tool.setuptools.package-data]
 pi_dsl = ["_native/*.so"]
+
+[dependency-groups]
+dev = [
+    "textual>=8.2.4",
+]

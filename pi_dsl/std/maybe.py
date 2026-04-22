@@ -1,5 +1,5 @@
 from .env import env
-from ..term import Ctor, Level, Pi, Rec, Term, Sort, Var
+from ..term import Ctor, IVar, Level, Pi, Rec, Term, Sort, Var
 from ..sugar import datatype, decl, DataTypeMeta, lam, Self
 
 # Optional value type: Nothing or Just wrapping a value of type T
@@ -15,8 +15,8 @@ class Maybe(metaclass=DataTypeMeta):
 
 # Eliminator for Maybe: applies default on Nothing, f on Just
 @decl(env)
-def maybe(T: Var[Sort(u)], U: Var[Sort(v)], default: Var[U], f: Var[T >> U], m: Var[Maybe(T)]) -> Term[U]:
-    motive = lam(lambda T, _: (T >> U) >> U)
-    nothing_case = lam(lambda T, _: default)
-    just_case = lam(lambda T, x, f: f(x))
-    return Rec(Maybe)(motive, nothing_case, just_case, T, m, f)
+def maybe(T: IVar[Sort(u)], U: IVar[Sort(v)], default: Var[U], f: Var[T >> U], m: Var[Maybe(T)]) -> Term[U]:
+    motive = lam(lambda _: (T >> U) >> U)
+    nothing_case = lam(lambda _: default)
+    just_case = lam(lambda x, f: f(x))
+    return Rec(Maybe)(motive, nothing_case, just_case, m, f)

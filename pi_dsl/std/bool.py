@@ -1,5 +1,5 @@
 from .env import env
-from ..term import Ctor, Level, Rec, Term, Sort, Var
+from ..term import Ctor, IVar, Level, Rec, Term, Sort, Var
 from ..sugar import datatype, decl, DataTypeMeta, lam, Self
 
 # Boolean datatype with two constructors: false and true
@@ -12,21 +12,21 @@ class Bool(metaclass=DataTypeMeta):
 T = Var("T")
 u = Level("u")
 @decl(env)
-def if_(T: Var[Sort(u)], t: Var[T], f: Var[T], cond: Var[Bool]) -> Term[T]:
+def if_(T: IVar[Sort(u)], t: Var[T], f: Var[T], cond: Var[Bool]) -> Term[T]:
     motive = lam(lambda _: T)
     return Rec(Bool)(motive, f, t, cond)
 
 # Boolean negation: returns false if true, true if false
 @decl(env)
 def not_(cond: Var[Bool]) -> Term[Bool]:
-    return if_(Bool, Bool.false, Bool.true, cond)
+    return if_(Bool.false, Bool.true, cond)
 
 # Boolean conjunction: returns true only if both arguments are true
 @decl(env)
 def and_(p: Var[Bool], q: Var[Bool]) -> Term[Bool]:
-    return if_(Bool, q, Bool.false, p)
+    return if_(q, Bool.false, p)
 
 # Boolean disjunction: returns true if either argument is true
 @decl(env)
 def or_(p: Var[Bool], q: Var[Bool]) -> Term[Bool]:
-    return if_(Bool, Bool.true, q, p)
+    return if_(Bool.true, q, p)

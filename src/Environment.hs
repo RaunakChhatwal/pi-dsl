@@ -81,6 +81,7 @@ data LocalContext = LocalContext {
 data DataTypeInfo = DataTypeInfo {
   univParams :: [UnivParamName],
   signature :: Type,
+  numParams :: Int,
   ctors :: [(CtorName, Type)],
   recursorUnivParam :: UnivParamName,
   recursorType :: Type
@@ -222,7 +223,7 @@ lookUpDataType typeName = asks (Map.lookup typeName . (.datatypes)) >>= \case
 -- Look up the type of a constructor
 lookUpCtor :: TC m => DataTypeName -> CtorName -> m ([UnivParamName], Type)
 lookUpCtor typeName ctorName = do
-  DataTypeInfo univParams _ ctors _ _ <- lookUpDataTypeInfo typeName
+  DataTypeInfo univParams _ _ ctors _ _ <- lookUpDataTypeInfo typeName
   case lookup ctorName ctors of
     Nothing -> throwError [i|Constructor #{ctorName} not found in data type #{typeName}|]
     Just ctorType -> return (univParams, ctorType)
@@ -235,29 +236,28 @@ lookUpConst = \case
   DataType typeName -> lookUpDataType typeName
   Ctor typeName ctorName -> lookUpCtor typeName ctorName
   Rec typeName -> do
-    DataTypeInfo univParams _ _ recursorUnivParam recursorType <- lookUpDataTypeInfo typeName
+    DataTypeInfo univParams _ _ _ recursorUnivParam recursorType <- lookUpDataTypeInfo typeName
     return (recursorUnivParam : univParams, recursorType)
 
 -- Add a local variable to the environment
 addLocal :: TermName -> Type -> TcMonad a -> TcMonad a
-addLocal var type' monad = do
+addLocal var type' continuation = do
   LocalContext map list <- asks (.localCtx)
   newLocalContext <- case Map.lookup var map of
     Just _ -> throwError [i|Attempted to add local #{ppr var} when already exists|]
     Nothing -> return $ LocalContext (Map.insert var type' map) ((var, type') : list)
-  local (\env -> env { localCtx = newLocalContext }) monad
+  local (\env -> env { localCtx = newLocalContext }) continuation
 
 -- Add a data type definition to the environment
 addDataType :: DataTypeName -> DataTypeInfo -> TcMonad a -> TcMonad a
-addDataType name dataTypeInfo monad = asks (Map.lookup name . (.datatypes)) >>= \case
-  Nothing -> flip local monad $
-    \env -> env { datatypes = Map.insert name dataTypeInfo env.datatypes }
+addDataType name dataTypeInfo continuation = asks (Map.lookup name . (.datatypes)) >>= \case
+  Nothing -> flip local continuation $ \env -> env { datatypes = Map.insert name dataTypeInfo env.datatypes }
   Just _ -> throwError [i|Name conflict when declaring data type #{name}|]
 
 -- Add a global declaration to the environment
 addDecl :: String -> DeclInfo -> TcMonad a -> TcMonad a
-addDecl var declInfo monad = asks (Map.lookup var . (.decls)) >>= \case
-  Nothing -> flip local monad $ \env -> env { decls = Map.insert var declInfo env.decls }
+addDecl var declInfo continuation = asks (Map.lookup var . (.decls)) >>= \case
+  Nothing -> flip local continuation $ \env -> env { decls = Map.insert var declInfo env.decls }
   Just _ -> throwError [i|Name conflict when declaring variable #{var}|]
 
 lookUpRecursorType :: DataTypeName -> TcMonad Type
